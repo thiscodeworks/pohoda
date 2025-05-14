@@ -1,6 +1,6 @@
 # Pohoda Connection Plugin
 
-A WordPress plugin for connecting to Pohoda mServer.
+A WordPress plugin for connecting to Pohoda mServer API.
 
 ## Installation
 
@@ -16,8 +16,22 @@ The plugin requires the following settings:
 - Port
 - Login
 - Password
+- IČO (Company ID)
+
+## Features
+
+- Connect to Pohoda mServer API
+- View and search products
+- View product stock levels and prices
+- View orders
+- View warehouse storage locations
+- Compare Pohoda products with WooCommerce products
+- Create and manage inventory movements
+- Test XML requests directly from the interface
 
 ## Requirements
 
 - WordPress 5.0 or higher
-- PHP 7.2 or higher 
+- PHP 7.2 or higher
+- Pohoda mServer installed and configured
+- WooCommerce (optional, for product synchronization) 
