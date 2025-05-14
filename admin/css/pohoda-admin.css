@@ -1,0 +1,53 @@
+.pohoda-controls {
+    margin: 20px 0;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.pohoda-count {
+    font-size: 14px;
+    color: #666;
+}
+
+.loading {
+    padding: 20px;
+    text-align: center;
+    color: #666;
+}
+
+#products-table-container,
+#stores-table-container {
+    margin-top: 20px;
+}
+
+.wp-list-table {
+    margin-top: 10px;
+}
+
+.wp-list-table th {
+    font-weight: 600;
+}
+
+.wp-list-table td,
+.wp-list-table th {
+    padding: 8px 10px;
+}
+
+.notice {
+    margin: 20px 0;
+    padding: 10px 15px;
+    border-left: 4px solid #fff;
+}
+
+.notice-error {
+    border-left-color: #dc3232;
+}
+
+.notice-warning {
+    border-left-color: #ffb900;
+}
+
+.notice p {
+    margin: 0;
+} 

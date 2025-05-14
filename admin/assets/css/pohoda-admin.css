@@ -1,0 +1,129 @@
+/* Styles for Pohoda Admin */
+.pohoda-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    margin-bottom: 20px;
+    padding: 15px;
+    background: #f8f9fa;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.filter-group label {
+    font-weight: 600;
+}
+
+.filter-group input,
+.filter-group select {
+    min-width: 200px;
+}
+
+.pohoda-pagination {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    justify-content: center;
+    margin: 20px 0;
+}
+
+#page-info {
+    min-width: 100px;
+    text-align: center;
+}
+
+/* WooCommerce integration styles */
+.woo-exists {
+    color: #1e7e34;
+    font-weight: bold;
+    margin-right: 10px;
+}
+
+.woo-missing {
+    color: #dc3545;
+    font-weight: bold;
+    margin-right: 10px;
+}
+
+.woo-mismatch {
+    color: #856404;
+    font-weight: bold;
+    margin-right: 10px;
+}
+
+.woo-unknown {
+    color: #6c757d;
+    font-weight: bold;
+    margin-right: 10px;
+}
+
+.wc-data {
+    color: #6c757d;
+    font-size: 0.9em;
+}
+
+.mismatch-details {
+    margin-top: 5px;
+    font-size: 0.9em;
+    color: #856404;
+    padding: 5px;
+    background-color: rgba(255, 243, 205, 0.5);
+    border-radius: 3px;
+}
+
+.mismatch-item {
+    margin-bottom: 2px;
+}
+
+.filter-group input[type="checkbox"] {
+    min-width: auto;
+    margin-top: 5px;
+}
+
+table.wp-list-table th:nth-child(8),
+table.wp-list-table td:nth-child(8) {
+    width: 150px;
+}
+
+a.button-small {
+    padding: 2px 6px;
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.pohoda-filter-section {
+    margin-bottom: 20px;
+}
+
+.pohoda-filter-section h3 {
+    margin-top: 0;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 10px;
+}
+
+#pohoda-raw-response-wrap {
+    margin-top: 30px;
+}
+
+/* Add styles for color-coded rows */
+.pohoda-row-match {
+    background-color: #d4edda !important; /* Green - everything matches */
+}
+
+.pohoda-row-mismatch {
+    background-color: #fff3cd !important; /* Yellow - some differences */
+}
+
+.pohoda-row-missing {
+    background-color: #f8d7da !important; /* Red - product not found in WooCommerce */
+}
+
+.pohoda-row-unknown {
+    background-color: #d6d8d9 !important; /* Gray - couldn't determine status */
+} 
