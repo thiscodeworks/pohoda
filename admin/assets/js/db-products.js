@@ -369,6 +369,365 @@ jQuery(document).ready(function($) {
         });
     });
 
+    // Find WooCommerce products not in Pohoda
+    $('#find-orphan-wc-products').on('click', function() {
+        var $button = $(this);
+        var $result = $('#orphan-products-result');
+        
+        $button.prop('disabled', true).text('Finding...');
+        $result.html('<div class="notice notice-info"><p>Looking for WooCommerce products not in Pohoda...</p></div>');
+        
+        // Log the request data
+        console.log('Sending AJAX request with data:', {
+            action: 'find_orphan_wc_products',
+            nonce: pohodaAdmin.nonce
+        });
+        
+        $.ajax({
+            url: pohodaAdmin.ajaxurl,
+            type: 'POST',
+            dataType: 'json',
+            data: {
+                action: 'find_orphan_wc_products',
+                nonce: pohodaAdmin.nonce
+            },
+            success: function(response) {
+                console.log('Response received:', response);
+                
+                // Process the response
+                if (response && response.success) {
+                    if (response.products && response.products.length > 0) {
+                        console.log('Found ' + response.products.length + ' orphaned products');
+                        renderOrphanProducts(response.products);
+                    } else {
+                        $result.html('<div class="notice notice-success"><p>No WooCommerce products found that are not in Pohoda.</p></div>');
+                    }
+                } else {
+                    console.error('Error response:', response);
+                    $result.html('<div class="notice notice-error"><p>Error: ' + (response ? response.message : 'Unknown error') + '</p></div>');
+                    
+                    // If debug info is available, display it
+                    if (response && response.debug) {
+                        var debugHtml = '<div class="notice notice-warning"><p>Debug Information:</p><pre>' + 
+                            JSON.stringify(response.debug, null, 2) + '</pre></div>';
+                        $result.append(debugHtml);
+                    }
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error('AJAX error:', {xhr: xhr, status: status, error: error});
+                
+                var responseText = xhr.responseText || '';
+                var errorMessage = 'Ajax Error: ' + error;
+                
+                // Try to extract json from the response if it's embedded in other content
+                var jsonMatch = responseText.match(/\{.*\}/s);
+                if (jsonMatch) {
+                    try {
+                        var extractedJson = jsonMatch[0];
+                        console.log('Extracted JSON:', extractedJson);
+                        var jsonResponse = JSON.parse(extractedJson);
+                        
+                        if (jsonResponse && jsonResponse.message) {
+                            errorMessage += '<br>Server says: ' + jsonResponse.message;
+                        }
+                    } catch (e) {
+                        console.error('Error parsing extracted JSON:', e);
+                    }
+                }
+                
+                // Show the raw response for debugging
+                errorMessage += '<br><br>Raw response:<br><pre style="max-height:200px;overflow:auto;background:#f5f5f5;padding:10px;border:1px solid #ddd;">' + 
+                    responseText + '</pre>';
+                    
+                $result.html('<div class="notice notice-error"><p>' + errorMessage + '</p></div>');
+            },
+            complete: function() {
+                console.log('AJAX request complete');
+                $button.prop('disabled', false).text('Find WooCommerce Products Not In Pohoda');
+            }
+        });
+    });
+    
+    function renderOrphanProducts(products) {
+        var $container = $('#orphan-products-result');
+        
+        // Clear any existing content
+        $container.empty();
+        
+        // Add count message
+        $container.append('<div class="notice notice-warning"><p>Found ' + products.length + ' WooCommerce products not in Pohoda database.</p></div>');
+        
+        // Add bulk action buttons
+        var bulkActions = '<div class="tablenav top" style="margin-bottom: 10px;">' +
+            '<div class="alignleft actions bulkactions">' +
+            '<button id="select-all-orphans" class="button">Select All</button> ' +
+            '<button id="select-zero-stock" class="button">Select Zero Stock</button> ' +
+            '<button id="delete-selected-orphans" class="button button-primary delete-wc-product-bulk">Delete Selected</button>' +
+            '</div>' +
+            '<div class="tablenav-pages" style="margin: 0 0 0 auto">' +
+            '<span class="displaying-num">' + products.length + ' items</span>' +
+            '</div>' +
+            '</div>';
+        $container.append(bulkActions);
+        
+        // Create table
+        var table = '<table class="wp-list-table widefat fixed striped">';
+        table += '<thead><tr>';
+        table += '<th class="check-column"><input type="checkbox" id="cb-select-all-orphans"></th>';
+        table += '<th>ID</th>';
+        table += '<th>SKU</th>';
+        table += '<th>Name</th>';
+        table += '<th>Price</th>';
+        table += '<th>Stock</th>';
+        table += '<th>Actions</th>';
+        table += '</tr></thead><tbody>';
+        
+        products.forEach(function(product) {
+            var isZeroStock = product.stock === 0 || product.stock === '0' || product.stock === 'n/a';
+            var stockClass = isZeroStock ? 'zero-stock' : '';
+            
+            table += '<tr class="' + stockClass + '">';
+            table += '<td><input type="checkbox" class="cb-select-orphan" data-product-id="' + product.id + '"></td>';
+            table += '<td>' + product.id + '</td>';
+            table += '<td>' + (product.sku || '') + '</td>';
+            table += '<td>' + product.name + '</td>';
+            table += '<td>' + product.price + '</td>';
+            table += '<td>' + product.stock + '</td>';
+            table += '<td>';
+            table += '<button class="button button-small delete-wc-product" data-product-id="' + product.id + '">Delete</button> ';
+            table += '<button class="button button-small hide-wc-product" data-product-id="' + product.id + '">Hide</button> ';
+            table += '<a href="' + product.edit_url + '" target="_blank" class="button button-small edit-wc-button"><span class="dashicons dashicons-edit"></span></a>';
+            table += '</td>';
+            table += '</tr>';
+        });
+        
+        table += '</tbody></table>';
+        $container.append(table);
+        
+        // Add bulk actions at the bottom too for convenience
+        $container.append(bulkActions);
+        
+        // Add event handlers for checkbox controls
+        $('#cb-select-all-orphans').on('change', function() {
+            $('.cb-select-orphan').prop('checked', $(this).prop('checked'));
+        });
+        
+        // Select all button
+        $('#select-all-orphans').on('click', function() {
+            $('.cb-select-orphan').prop('checked', true);
+            $('#cb-select-all-orphans').prop('checked', true);
+        });
+        
+        // Select zero stock button
+        $('#select-zero-stock').on('click', function() {
+            $('.cb-select-orphan').prop('checked', false);
+            $('.zero-stock .cb-select-orphan').prop('checked', true);
+            // Update the "select all" checkbox state based on if all checkboxes are selected
+            var allChecked = $('.cb-select-orphan').length === $('.cb-select-orphan:checked').length;
+            $('#cb-select-all-orphans').prop('checked', allChecked);
+        });
+        
+        // Delete selected button
+        $('.delete-wc-product-bulk').on('click', function() {
+            var selectedIds = [];
+            $('.cb-select-orphan:checked').each(function() {
+                selectedIds.push($(this).data('product-id'));
+            });
+            
+            if (selectedIds.length === 0) {
+                alert('Please select at least one product to delete.');
+                return;
+            }
+            
+            if (!confirm('Are you sure you want to delete ' + selectedIds.length + ' selected products? This cannot be undone.')) {
+                return;
+            }
+            
+            deleteBulkProducts(selectedIds);
+        });
+        
+        // Log completion for debugging
+        console.log('Rendered table for ' + products.length + ' products');
+    }
+    
+    // Function to delete multiple products in bulk
+    function deleteBulkProducts(productIds) {
+        if (!productIds || productIds.length === 0) {
+            return;
+        }
+        
+        var $progressBar = $('<div class="progress-bar-container"><div class="progress-bar-inner" style="width: 0%"></div></div>');
+        var $progressText = $('<div class="progress-text">Processing 0 of ' + productIds.length + ' products</div>');
+        var $progressContainer = $('<div class="notice notice-info"></div>').append($progressBar, $progressText);
+        
+        // Insert progress bar at the top of the results
+        $('#orphan-products-result').prepend($progressContainer);
+        
+        var processed = 0;
+        var successful = 0;
+        var failed = 0;
+        
+        // Process each product one by one to avoid overwhelming the server
+        function processNext(index) {
+            if (index >= productIds.length) {
+                // All done
+                $progressBar.find('.progress-bar-inner').css('width', '100%');
+                $progressText.text('Completed: ' + successful + ' deleted, ' + failed + ' failed');
+                
+                // Update the product list
+                setTimeout(function() {
+                    if (successful > 0) {
+                        // Remove deleted products from the table
+                        productIds.forEach(function(id) {
+                            $('.cb-select-orphan[data-product-id="' + id + '"]').closest('tr').remove();
+                        });
+                        
+                        // Update product count
+                        var remainingCount = $('#orphan-products-result table tbody tr').length;
+                        $('.displaying-num').text(remainingCount + ' items');
+                        
+                        // If no products left, show success message
+                        if (remainingCount === 0) {
+                            $('#orphan-products-result').html('<div class="notice notice-success"><p>All orphaned products have been removed.</p></div>');
+                        } else {
+                            // Replace the progress with a success message
+                            $progressContainer.removeClass('notice-info').addClass('notice-success')
+                                .html('<p>' + successful + ' products deleted successfully. ' + failed + ' failed.</p>');
+                        }
+                    } else {
+                        // Show error message
+                        $progressContainer.removeClass('notice-info').addClass('notice-error')
+                            .html('<p>Failed to delete any products. Please try again.</p>');
+                    }
+                }, 500);
+                return;
+            }
+            
+            var productId = productIds[index];
+            var percent = Math.round(index / productIds.length * 100);
+            
+            $progressBar.find('.progress-bar-inner').css('width', percent + '%');
+            $progressText.text('Processing ' + (index+1) + ' of ' + productIds.length + ' products');
+            
+            $.ajax({
+                url: pohodaAdmin.ajaxurl,
+                type: 'POST',
+                data: {
+                    action: 'delete_orphan_wc_product',
+                    nonce: pohodaAdmin.nonce,
+                    product_id: productId
+                },
+                success: function(response) {
+                    processed++;
+                    
+                    if (response.success) {
+                        successful++;
+                    } else {
+                        failed++;
+                        console.error('Failed to delete product ID ' + productId + ':', response);
+                    }
+                    
+                    // Process next product
+                    processNext(index + 1);
+                },
+                error: function(xhr, status, error) {
+                    processed++;
+                    failed++;
+                    console.error('AJAX error while deleting product ID ' + productId + ':', error);
+                    
+                    // Process next product
+                    processNext(index + 1);
+                }
+            });
+        }
+        
+        // Start processing
+        processNext(0);
+    }
+
+    // Handle deletion of orphan WooCommerce products
+    $(document).on('click', '.delete-wc-product', function() {
+        var $button = $(this);
+        var productId = $button.data('product-id');
+        
+        if (!confirm('Are you sure you want to permanently delete this WooCommerce product (ID: ' + productId + ')?')) {
+            return;
+        }
+        
+        $button.prop('disabled', true).text('Deleting...');
+        
+        $.ajax({
+            url: pohodaAdmin.ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'delete_orphan_wc_product',
+                nonce: pohodaAdmin.nonce,
+                product_id: productId
+            },
+            success: function(response) {
+                if (response.success) {
+                    // Remove row from table
+                    $button.closest('tr').fadeOut(400, function() {
+                        $(this).remove();
+                        
+                        // Update count message
+                        var newCount = $('#orphan-products-result table tbody tr').length;
+                        $('#orphan-products-result .notice p').text('Found ' + newCount + ' WooCommerce products not in Pohoda database.');
+                        
+                        // If no products left, show success message
+                        if (newCount === 0) {
+                            $('#orphan-products-result').html('<div class="notice notice-success"><p>All orphaned products have been removed.</p></div>');
+                        }
+                    });
+                } else {
+                    alert('Error: ' + (response.data || 'Failed to delete product'));
+                    $button.prop('disabled', false).text('Delete');
+                }
+            },
+            error: function(xhr, status, error) {
+                alert('Ajax Error: ' + error);
+                $button.prop('disabled', false).text('Delete');
+            }
+        });
+    });
+    
+    // Handle hiding orphan WooCommerce products (set to private)
+    $(document).on('click', '.hide-wc-product', function() {
+        var $button = $(this);
+        var productId = $button.data('product-id');
+        
+        if (!confirm('Are you sure you want to hide this WooCommerce product (ID: ' + productId + ')? It will be set to private.')) {
+            return;
+        }
+        
+        $button.prop('disabled', true).text('Hiding...');
+        
+        $.ajax({
+            url: pohodaAdmin.ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'hide_orphan_wc_product',
+                nonce: pohodaAdmin.nonce,
+                product_id: productId
+            },
+            success: function(response) {
+                if (response.success) {
+                    // Update the row to indicate it's now hidden
+                    $button.closest('tr').css('opacity', '0.5');
+                    $button.text('Hidden').prop('disabled', true);
+                } else {
+                    alert('Error: ' + (response.data || 'Failed to hide product'));
+                    $button.prop('disabled', false).text('Hide');
+                }
+            },
+            error: function(xhr, status, error) {
+                alert('Ajax Error: ' + error);
+                $button.prop('disabled', false).text('Hide');
+            }
+        });
+    });
+
     // Handle sync db product button clicks (delegated)
     $(document).on('click', '.sync-db-product', function() {
         var $button = $(this);
@@ -668,162 +1027,280 @@ jQuery(document).ready(function($) {
         $progressCurrent.text('0');
         $progressTotal.text('Loading...');
         
-        // First, get ALL mismatched products across all pages
-        $.ajax({
-            url: pohodaAdmin.ajaxurl,
-            type: 'POST',
-            data: {
-                action: 'get_all_mismatched_products',
-                nonce: pohodaAdmin.nonce
-            },
-            success: function(response) {
-                console.log('Full response from get_all_mismatched_products:', response);
+        // First, get all mismatched products directly from the current page 
+        // to see if there are any before making the AJAX request
+        var mismatchedRowsInDOM = $('tr.pohoda-row-mismatch').length;
+        console.log('Mismatched rows found in DOM:', mismatchedRowsInDOM);
+        
+        if (mismatchedRowsInDOM > 0) {
+            // Collect products from visible rows
+            var visibleProducts = [];
+            $('tr.pohoda-row-mismatch').each(function() {
+                var $row = $(this);
+                var productId = $row.find('td:first-child').text();
+                var vatRate = 21; // Default
                 
-                if (response.success && response.data) {
-                    var debug = response.data.debug || {};
-                    console.log('Debug info:', debug);
-                    
-                    // Check if products array exists
-                    if (!response.data.products || !Array.isArray(response.data.products)) {
-                        console.error('Invalid products data:', response.data);
-                        alert('Error: Invalid product data returned from server. Check console for details.');
+                // Extract VAT rate from the displayed VAT cell
+                var vatText = $row.find('td:nth-child(6)').text();
+                var vatMatch = vatText.match(/\(([^)]+)%\)/);
+                if (vatMatch) {
+                    vatRate = parseFloat(vatMatch[1]);
+                }
+                
+                visibleProducts.push({
+                    id: productId,
+                    vat_rate: vatRate
+                });
+            });
+            
+            console.log('Visible mismatched products:', visibleProducts.length);
+            
+            // Function to sync a batch of products
+            function syncProducts(products) {
+                var totalToSync = products.length;
+                var processed = 0;
+                
+                $progressTotal.text(totalToSync);
+                $progressCurrent.text(processed);
+                $progressBar.css('width', '0%');
+                
+                function syncNext(index) {
+                    if (index >= totalToSync) {
+                        // All done
                         $button.prop('disabled', false);
+                        alert('All ' + totalToSync + ' visible mismatched products have been synced!');
                         $progress.hide();
                         return;
                     }
                     
-                    var mismatchedProducts = response.data.products;
-                    var totalProducts = mismatchedProducts.length;
+                    var product = products[index];
+                    console.log('Syncing product ID:', product.id);
                     
-                    console.log('Mismatched products found:', totalProducts);
-                    
-                    if (totalProducts === 0) {
-                        // Show more detailed debug message
-                        var errorMessage = 'No mismatched products found. ';
-                        if (debug.pages_processed) {
-                            errorMessage += 'Server processed ' + debug.pages_processed + ' pages. ';
-                        }
-                        
-                        // Show status counts if available
-                        if (debug.page_results && debug.page_results.length > 0) {
-                            var firstPage = debug.page_results[0];
-                            if (firstPage.status_counts) {
-                                errorMessage += '\nProduct statuses: ';
-                                for (var status in firstPage.status_counts) {
-                                    errorMessage += status + ': ' + firstPage.status_counts[status] + ', ';
+                    $.ajax({
+                        url: pohodaAdmin.ajaxurl,
+                        type: 'POST',
+                        data: {
+                            action: 'sync_db_product',
+                            nonce: pohodaAdmin.nonce,
+                            product_id: product.id,
+                            vat_rate: product.vat_rate
+                        },
+                        success: function(syncResponse) {
+                            processed++;
+                            $progressCurrent.text(processed);
+                            $progressBar.css('width', (processed / totalToSync * 100) + '%');
+                            
+                            // Update row in DOM
+                            var $row = $('tr').filter(function() {
+                                return $(this).find('td:first-child').text() == product.id;
+                            });
+                            
+                            if ($row.length) {
+                                // Update row appearance
+                                $row.removeClass('pohoda-row-mismatch pohoda-row-unknown')
+                                    .addClass('pohoda-row-match');
+                                
+                                // Update status cell
+                                $row.find('td:nth-child(7)').html('<span class="woo-exists">Synced</span>');
+                                
+                                // Update stock and price display if available in response
+                                if (syncResponse.success && syncResponse.data) {
+                                    if (syncResponse.data.stock !== undefined) {
+                                        $row.find('td:nth-child(4)').text(syncResponse.data.stock);
+                                    }
+                                    
+                                    if (syncResponse.data.price !== undefined) {
+                                        $row.find('td:nth-child(6)').html(
+                                            syncResponse.data.price + ' (' + syncResponse.data.vat_rate + '%)'
+                                        );
+                                    }
                                 }
                             }
+                            
+                            // Continue with next product
+                            setTimeout(function() {
+                                syncNext(index + 1);
+                            }, 50);
+                        },
+                        error: function(xhr, status, error) {
+                            console.error('Error syncing product:', product.id, error);
+                            
+                            // Continue anyway
+                            processed++;
+                            $progressCurrent.text(processed);
+                            $progressBar.css('width', (processed / totalToSync * 100) + '%');
+                            
+                            setTimeout(function() {
+                                syncNext(index + 1);
+                            }, 50);
+                        }
+                    });
+                }
+                
+                // Start syncing
+                syncNext(0);
+            }
+            
+            // Start syncing the visible products
+            syncProducts(visibleProducts);
+        } else {
+            // No visible mismatched products, try to get them from the server
+            console.log('No visible mismatched products, checking server...');
+            
+            // First, get ALL mismatched products across all pages
+            $.ajax({
+                url: pohodaAdmin.ajaxurl,
+                type: 'POST',
+                data: {
+                    action: 'get_all_mismatched_products',
+                    nonce: pohodaAdmin.nonce
+                },
+                success: function(response) {
+                    console.log('Full response from get_all_mismatched_products:', response);
+                    
+                    if (response.success && response.data) {
+                        var debug = response.data.debug || {};
+                        console.log('Debug info:', debug);
+                        
+                        // Check if products array exists
+                        if (!response.data.products || !Array.isArray(response.data.products)) {
+                            console.error('Invalid products data:', response.data);
+                            alert('Error: Invalid product data returned from server. Check console for details.');
+                            $button.prop('disabled', false);
+                            $progress.hide();
+                            return;
+                        }
+                        
+                        var mismatchedProducts = response.data.products;
+                        var totalProducts = mismatchedProducts.length;
+                        
+                        console.log('Mismatched products found on server:', totalProducts);
+                        
+                        if (totalProducts === 0) {
+                            // Show more detailed debug message
+                            var errorMessage = 'No mismatched products found on server. ';
+                            if (debug.pages_processed) {
+                                errorMessage += 'Server processed ' + debug.pages_processed + ' pages. ';
+                            }
+                            
+                            // Show status counts if available
+                            if (debug.all_status_counts) {
+                                errorMessage += '\nProduct statuses: ';
+                                for (var status in debug.all_status_counts) {
+                                    errorMessage += status + ': ' + debug.all_status_counts[status] + ', ';
+                                }
+                            }
+                            
+                            alert(errorMessage);
+                            $button.prop('disabled', false);
+                            $progress.hide();
+                            return;
+                        }
+                        
+                        var processedProducts = 0;
+                        $progressTotal.text(totalProducts);
+                        $progressCurrent.text(processedProducts);
+                        
+                        // Process products one by one
+                        function syncNextProduct(index) {
+                            if (index >= totalProducts) {
+                                // All products processed
+                                $button.prop('disabled', false);
+                                alert('All ' + totalProducts + ' mismatched products have been synced!');
+                                $progress.hide();
+                                return;
+                            }
+                            
+                            var product = mismatchedProducts[index];
+                            console.log('Syncing product:', product.id, product.name);
+                            
+                            $.ajax({
+                                url: pohodaAdmin.ajaxurl,
+                                type: 'POST',
+                                data: {
+                                    action: 'sync_db_product',
+                                    nonce: pohodaAdmin.nonce,
+                                    product_id: product.id,
+                                    vat_rate: product.vat_rate || 21
+                                },
+                                success: function(syncResponse) {
+                                    processedProducts++;
+                                    $progressCurrent.text(processedProducts);
+                                    $progressBar.css('width', (processedProducts / totalProducts * 100) + '%');
+                                    
+                                    console.log('Product synced:', product.id, 'Progress:', processedProducts + '/' + totalProducts);
+                                    
+                                    // Update row in DOM if it exists
+                                    var $row = $('tr').filter(function() {
+                                        return $(this).find('td:first-child').text() == product.id;
+                                    });
+                                    
+                                    if ($row.length) {
+                                        // Update row appearance
+                                        $row.removeClass('pohoda-row-mismatch pohoda-row-unknown')
+                                            .addClass('pohoda-row-match');
+                                        
+                                        // Update status cell
+                                        $row.find('td:nth-child(7)').html('<span class="woo-exists">Synced</span>');
+                                        
+                                        // Update stock and price display if available in response
+                                        if (syncResponse.success && syncResponse.data) {
+                                            if (syncResponse.data.stock !== undefined) {
+                                                $row.find('td:nth-child(4)').text(syncResponse.data.stock);
+                                            }
+                                            
+                                            if (syncResponse.data.price !== undefined) {
+                                                $row.find('td:nth-child(6)').html(
+                                                    syncResponse.data.price + ' (' + syncResponse.data.vat_rate + '%)'
+                                                );
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Process next product after a small delay to avoid overwhelming the server
+                                    setTimeout(function() {
+                                        syncNextProduct(index + 1);
+                                    }, 50);
+                                },
+                                error: function(xhr, status, error) {
+                                    console.error('Error syncing product:', product.id, error);
+                                    
+                                    // Continue with next product even if this one fails
+                                    processedProducts++;
+                                    $progressCurrent.text(processedProducts);
+                                    $progressBar.css('width', (processedProducts / totalProducts * 100) + '%');
+                                    
+                                    setTimeout(function() {
+                                        syncNextProduct(index + 1);
+                                    }, 50);
+                                }
+                            });
+                        }
+                        
+                        // Start processing
+                        syncNextProduct(0);
+                    } else {
+                        console.error('Failed to retrieve mismatched products:', response);
+                        
+                        // Show more detailed error message
+                        var errorMessage = 'Failed to retrieve mismatched products. ';
+                        if (response.data && response.data.debug) {
+                            errorMessage += 'Debug info: ' + JSON.stringify(response.data.debug);
                         }
                         
                         alert(errorMessage);
                         $button.prop('disabled', false);
                         $progress.hide();
-                        return;
                     }
-                    
-                    var processedProducts = 0;
-                    $progressTotal.text(totalProducts);
-                    $progressCurrent.text(processedProducts);
-                    
-                    // Process products one by one
-                    function syncNextProduct(index) {
-                        if (index >= totalProducts) {
-                            // All products processed
-                            $button.prop('disabled', false);
-                            alert('All ' + totalProducts + ' mismatched products have been synced!');
-                            $progress.hide();
-                            return;
-                        }
-                        
-                        var product = mismatchedProducts[index];
-                        console.log('Syncing product:', product.id, product.name);
-                        
-                        $.ajax({
-                            url: pohodaAdmin.ajaxurl,
-                            type: 'POST',
-                            data: {
-                                action: 'sync_db_product',
-                                nonce: pohodaAdmin.nonce,
-                                product_id: product.id,
-                                vat_rate: product.vat_rate || 21
-                            },
-                            success: function(syncResponse) {
-                                processedProducts++;
-                                $progressCurrent.text(processedProducts);
-                                $progressBar.css('width', (processedProducts / totalProducts * 100) + '%');
-                                
-                                console.log('Product synced:', product.id, 'Progress:', processedProducts + '/' + totalProducts);
-                                
-                                // Update row in DOM if it exists
-                                var $row = $('tr').filter(function() {
-                                    return $(this).find('td:first-child').text() == product.id;
-                                });
-                                
-                                if ($row.length) {
-                                    // Update row appearance
-                                    $row.removeClass('pohoda-row-mismatch pohoda-row-unknown')
-                                        .addClass('pohoda-row-match');
-                                    
-                                    // Update status cell
-                                    $row.find('td:nth-child(7)').html('<span class="woo-exists">Synced</span>');
-                                    
-                                    // Update stock and price display if available in response
-                                    if (syncResponse.success && syncResponse.data) {
-                                        if (syncResponse.data.stock !== undefined) {
-                                            $row.find('td:nth-child(4)').text(syncResponse.data.stock);
-                                        }
-                                        
-                                        if (syncResponse.data.price !== undefined) {
-                                            $row.find('td:nth-child(6)').html(
-                                                syncResponse.data.price + ' (' + syncResponse.data.vat_rate + '%)'
-                                            );
-                                        }
-                                    }
-                                }
-                                
-                                // Process next product after a small delay to avoid overwhelming the server
-                                setTimeout(function() {
-                                    syncNextProduct(index + 1);
-                                }, 50);
-                            },
-                            error: function(xhr, status, error) {
-                                console.error('Error syncing product:', product.id, error);
-                                
-                                // Continue with next product even if this one fails
-                                processedProducts++;
-                                $progressCurrent.text(processedProducts);
-                                $progressBar.css('width', (processedProducts / totalProducts * 100) + '%');
-                                
-                                setTimeout(function() {
-                                    syncNextProduct(index + 1);
-                                }, 50);
-                            }
-                        });
-                    }
-                    
-                    // Start processing
-                    syncNextProduct(0);
-                } else {
-                    console.error('Failed to retrieve mismatched products:', response);
-                    
-                    // Show more detailed error message
-                    var errorMessage = 'Failed to retrieve mismatched products. ';
-                    if (response.data && response.data.debug) {
-                        errorMessage += 'Debug info: ' + JSON.stringify(response.data.debug);
-                    }
-                    
-                    alert(errorMessage);
+                },
+                error: function(xhr, status, error) {
+                    console.error('AJAX error:', error, xhr.responseText);
+                    alert('Error: ' + error);
                     $button.prop('disabled', false);
                     $progress.hide();
                 }
-            },
-            error: function(xhr, status, error) {
-                console.error('AJAX error:', error, xhr.responseText);
-                alert('Error: ' + error);
-                $button.prop('disabled', false);
-                $progress.hide();
-            }
-        });
+            });
+        }
     });
 
     // Handle create all missing products button
