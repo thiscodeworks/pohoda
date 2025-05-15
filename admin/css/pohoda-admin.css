@@ -50,4 +50,13 @@
 
 .notice p {
     margin: 0;
+}
+
+.button .dashicons {
+    vertical-align: middle;
+    margin-top: -3px;
+}
+
+.dashicons-visibility, .dashicons-edit {
+    line-height: 1.4 !important;
 } 

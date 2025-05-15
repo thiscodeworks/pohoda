@@ -3,16 +3,25 @@ jQuery(document).ready(function($) {
     var productsPerPage = 10;
     var totalPages = 1;
 
-    // Initialize on page load for DB products tab
-    if (window.location.href.indexOf('tab=db_products') > -1) {
-        loadDbProducts();
+    // Initialize on page load for products tab
+    if (window.location.href.indexOf('tab=products') > -1) {
+        // Load saved preferences for per page if available
+        var savedPerPage = localStorage.getItem('pohoda_products_per_page');
+        if (savedPerPage) {
+            $('#db-products-per-page').val(savedPerPage);
+        }
     }
+
+    // Save per page selection to localStorage
+    $('#db-products-per-page').on('change', function() {
+        localStorage.setItem('pohoda_products_per_page', $(this).val());
+    });
 
     // Load products function
     function loadDbProducts() {
         var $button = $('#load-db-products');
-        var $result = $('#db-products-result');
-        var $pagination = $('.db-pohoda-pagination');
+        var $result = $('#products-result');
+        var $pagination = $('.pohoda-pagination');
 
         $button.prop('disabled', true);
         $result.html('<div class="notice notice-info"><p>Loading products...</p></div>');
@@ -71,7 +80,7 @@ jQuery(document).ready(function($) {
     }
 
     function renderProducts(products) {
-        var $container = $('#db-products-result');
+        var $container = $('#products-result');
         
         var table = '<table class="wp-list-table widefat fixed striped">';
         table += '<thead><tr>';
@@ -80,9 +89,9 @@ jQuery(document).ready(function($) {
         table += '<th>Name</th>';
         table += '<th>Stock</th>';
         table += '<th>Price</th>';
+        table += '<th>Price incl. VAT</th>';
         table += '<th>WooCommerce</th>';
         table += '<th>Actions</th>';
-        table += '<th>Details</th>';
         table += '</tr></thead><tbody>';
         
         products.forEach(function(product) {
@@ -92,8 +101,7 @@ jQuery(document).ready(function($) {
             if (product.woocommerce_exists) {
                 if (product.comparison_status === 'match') {
                     rowClass = 'pohoda-row-match';
-                    wooDetails = '<span class="woo-exists">Synced</span> ' +
-                        '<a href="' + product.woocommerce_url + '" target="_blank" class="button button-small">Edit</a>';
+                    wooDetails = '<span class="woo-exists">Synced</span>';
                 } else if (product.comparison_status === 'mismatch') {
                     rowClass = 'pohoda-row-mismatch';
                     
@@ -101,7 +109,13 @@ jQuery(document).ready(function($) {
                     var stockDiff = Math.abs(parseFloat(product.count) - parseFloat(product.woocommerce_stock));
                     var stockMatch = stockDiff <= 0.001;
                     
-                    var priceDiff = Math.abs(parseFloat(product.selling_price) - parseFloat(product.woocommerce_price));
+                    // Calculate price with VAT for comparison
+                    var vatRate = product.vat_rate || 21; // Default to 21% if not specified
+                    var priceWithVat = parseFloat(product.selling_price) * (1 + (vatRate / 100));
+                    priceWithVat = Math.ceil(priceWithVat);
+                    
+                    // Use the price with VAT for comparison with WooCommerce price
+                    var priceDiff = Math.abs(priceWithVat - parseFloat(product.woocommerce_price));
                     var priceMatch = priceDiff <= 0.01;
                     
                     var mismatchDetails = '';
@@ -111,76 +125,67 @@ jQuery(document).ready(function($) {
                     }
                     if (!priceMatch) {
                         mismatchDetails += '<div class="mismatch-item">Price: ' + 
-                            'POHODA: ' + product.selling_price + ' vs WC: ' + product.woocommerce_price + '</div>';
+                            'POHODA: ' + priceWithVat.toFixed(2) + ' vs WC: ' + product.woocommerce_price + '</div>';
                     }
                     
-                    wooDetails = '<span class="woo-mismatch">Mismatch</span> ' +
-                        '<a href="' + product.woocommerce_url + '" target="_blank" class="button button-small">Edit</a>' +
+                    wooDetails = '<span class="woo-mismatch">Mismatch</span>' +
                         '<div class="mismatch-details">' + mismatchDetails + '</div>';
                 } else {
                     rowClass = 'pohoda-row-unknown';
-                    wooDetails = '<span class="woo-unknown">Unknown</span> ' +
-                        '<a href="' + product.woocommerce_url + '" target="_blank" class="button button-small">Edit</a>';
+                    wooDetails = '<span class="woo-unknown">Unknown</span>';
                 }
             } else {
                 rowClass = 'pohoda-row-missing';
-                wooDetails = '<span class="woo-missing">Missing</span> ' + 
-                    '<a href="post-new.php?post_type=product&sku=' + (product.code || '') + 
-                    '&name=' + encodeURIComponent(product.name || '') + 
-                    '&regular_price=' + (product.selling_price || '') + 
-                    '&stock_quantity=' + (product.count || '') + 
-                    '" target="_blank" class="button button-small">Create</a>';
+                wooDetails = '<span class="woo-missing">Missing</span>';
             }
+            
+            // Calculate price with VAT
+            var vatRate = product.vat_rate || 21; // Default to 21% if not specified
+            var priceWithVat = parseFloat(product.selling_price) * (1 + (vatRate / 100));
+            // Round to whole number (ceiling)
+            priceWithVat = Math.ceil(priceWithVat);
             
             table += '<tr class="' + rowClass + '">';
             table += '<td>' + (product.id || '') + '</td>';
             table += '<td>' + (product.code || '') + '</td>';
             table += '<td>' + (product.name || '') + '</td>';
-            table += '<td>' + (product.count !== undefined ? product.count : '') + 
-                (product.woocommerce_stock !== undefined && product.woocommerce_stock !== '' ? 
-                ' <span class="wc-data">(WC: ' + product.woocommerce_stock + ')</span>' : '') + '</td>';
-            table += '<td>' + (product.selling_price !== undefined ? product.selling_price : '') + 
-                (product.woocommerce_price !== undefined && product.woocommerce_price !== '' ? 
-                ' <span class="wc-data">(WC: ' + product.woocommerce_price + ')</span>' : '') + '</td>';
+            table += '<td>' + (product.count !== undefined ? product.count : '') + '</td>';
+            table += '<td>' + (product.selling_price !== undefined ? product.selling_price : '') + '</td>';
+            table += '<td>' + priceWithVat + ' (' + vatRate + '%)</td>';
             table += '<td>' + wooDetails + '</td>';
             
-            // Add new column with sync button (only for products that exist in WooCommerce)
-            var syncButton = '';
+            // Add actions column with buttons
+            var actionButtons = '';
             if (product.woocommerce_exists) {
-                syncButton = '<button class="button button-primary sync-db-product" data-product-id="' + (product.id || '') + '">Sync</button>';
+                actionButtons = '<button class="button button-primary sync-db-product" data-product-id="' + (product.id || '') + '" data-vat-rate="' + vatRate + '">Sync</button>';
                 
-                // Add eye icon button to view product in WooCommerce
+                // Extract product ID from the edit URL
                 if (product.woocommerce_url) {
-                    syncButton += ' <a href="' + product.woocommerce_url + '" target="_blank" class="button button-secondary" title="View in WooCommerce"><span class="dashicons dashicons-visibility" style="margin-top: 2px;"></span></a>';
+                    var productId = product.woocommerce_url.match(/post=(\d+)/);
+                    if (productId && productId[1]) {
+                        // Create frontend link with eye icon
+                        var frontendUrl = '/?p=' + productId[1];
+                        actionButtons += ' <a href="' + frontendUrl + '" target="_blank" class="button view-woo-button" title="View product on frontend"><span class="dashicons dashicons-visibility"></span></a>';
+                        
+                        // Add edit button with pen icon
+                        actionButtons += ' <a href="' + product.woocommerce_url + '" target="_blank" class="button edit-woo-button" title="Edit in WooCommerce admin"><span class="dashicons dashicons-edit"></span></a>';
+                    } else {
+                        // Fallback to just the edit link if we can't extract the ID
+                        actionButtons += ' <a href="' + product.woocommerce_url + '" target="_blank" class="button edit-woo-button" title="Edit in WooCommerce admin"><span class="dashicons dashicons-edit"></span></a>';
+                    }
                 }
             } else {
-                syncButton = '-';
+                // Create button for missing products
+                actionButtons = '<button class="button button-primary create-in-wc" ' +
+                    'data-product-id="' + (product.id || '') + '" ' +
+                    'data-product-code="' + (product.code || '') + '" ' +
+                    'data-product-name="' + encodeURIComponent(product.name || '') + '" ' + 
+                    'data-product-price="' + priceWithVat + '" ' +
+                    'data-product-stock="' + (product.count || '') + '" ' +
+                    'data-vat-rate="' + vatRate + '"' +
+                    '>Create in WC</button>';
             }
-            table += '<td>' + syncButton + '</td>';
-            
-            // Add new column for related files and details button
-            var detailsButton = '';
-            var hasDetails = (product.related_files && product.related_files.length > 0) || 
-                           (product.pictures && product.pictures.length > 0) || 
-                           (product.categories && product.categories.length > 0) ||
-                           (product.related_stocks && product.related_stocks.length > 0) ||
-                           (product.alternative_stocks && product.alternative_stocks.length > 0);
-            
-            if (hasDetails) {
-                detailsButton = '<button class="button show-product-details" data-product-id="' + (product.id || '') + '">Details</button>';
-                
-                // Store details in data attribute to retrieve later
-                detailsButton += '<div class="hidden product-details-data" ' +
-                    'data-files=\'' + JSON.stringify(product.related_files || []) + '\' ' +
-                    'data-pictures=\'' + JSON.stringify(product.pictures || []) + '\' ' +
-                    'data-categories=\'' + JSON.stringify(product.categories || []) + '\' ' +
-                    'data-related=\'' + JSON.stringify(product.related_stocks || []) + '\' ' +
-                    'data-alternatives=\'' + JSON.stringify(product.alternative_stocks || []) + '\' ' +
-                    'data-product-name=\'' + (product.name || '') + '\'></div>';
-            } else {
-                detailsButton = '-';
-            }
-            table += '<td>' + detailsButton + '</td>';
+            table += '<td>' + actionButtons + '</td>';
             
             table += '</tr>';
         });
@@ -200,7 +205,9 @@ jQuery(document).ready(function($) {
                   '.woo-unknown { color: #6c757d; font-weight: bold; margin-right: 10px; } ' +
                   '.wc-data { color: #6c757d; font-size: 0.9em; } ' +
                   '.mismatch-details { margin-top: 5px; font-size: 0.9em; color: #856404; } ' +
-                  '.mismatch-item { margin-bottom: 2px; }')
+                  '.mismatch-item { margin-bottom: 2px; }' +
+                  '.view-woo-button, .edit-woo-button { padding: 4px !important; line-height: 1 !important; height: auto !important; min-height: 30px !important; vertical-align: middle !important; }' +
+                  '.dashicons { line-height: 1.5 !important; width: 18px !important; height: 18px !important; font-size: 18px !important; vertical-align: middle !important; }')
             .appendTo('head');
     }
 
@@ -210,20 +217,28 @@ jQuery(document).ready(function($) {
         currentPage = pagination.current_page;
         totalPages = pagination.last_page;
         
-        $('#db-page-info').text('Page ' + currentPage + ' of ' + totalPages);
-        $('#db-prev-page').prop('disabled', currentPage <= 1);
-        $('#db-next-page').prop('disabled', currentPage >= totalPages);
+        // Handle "Show All" case - hide pagination if only one page
+        if (totalPages <= 1) {
+            $('.pohoda-pagination').hide();
+            return;
+        } else {
+            $('.pohoda-pagination').show();
+        }
+        
+        $('#page-info').text('Page ' + currentPage + ' of ' + totalPages);
+        $('#prev-page').prop('disabled', currentPage <= 1);
+        $('#next-page').prop('disabled', currentPage >= totalPages);
     }
 
     // Handle pagination
-    $('#db-prev-page').on('click', function() {
+    $('#prev-page').on('click', function() {
         if (currentPage > 1) {
             currentPage--;
             loadDbProducts();
         }
     });
 
-    $('#db-next-page').on('click', function() {
+    $('#next-page').on('click', function() {
         if (currentPage < totalPages) {
             currentPage++;
             loadDbProducts();
@@ -358,6 +373,7 @@ jQuery(document).ready(function($) {
     $(document).on('click', '.sync-db-product', function() {
         var $button = $(this);
         var productId = $button.data('product-id');
+        var vatRate = $button.data('vat-rate') || 21; // Default to 21% if not specified
         
         $button.prop('disabled', true).text('Syncing...');
         
@@ -367,29 +383,31 @@ jQuery(document).ready(function($) {
             data: {
                 action: 'sync_db_product',
                 nonce: pohodaAdmin.nonce,
-                product_id: productId
+                product_id: productId,
+                vat_rate: vatRate
             },
             success: function(response) {
                 if (response.success) {
                     // Update row appearance
-                    $button.closest('tr').removeClass('pohoda-row-mismatch pohoda-row-unknown')
+                    var $row = $button.closest('tr');
+                    $row.removeClass('pohoda-row-mismatch pohoda-row-unknown')
                         .addClass('pohoda-row-match');
-                    $button.closest('tr').find('.woo-mismatch, .woo-unknown').removeClass('woo-mismatch woo-unknown')
-                        .addClass('woo-exists').text('Synced');
-                    $button.closest('tr').find('.mismatch-details').remove();
                     
-                    // Update the displayed values
+                    // Update WooCommerce status cell
+                    var $statusCell = $row.find('td:nth-child(7)');
+                    $statusCell.html('<span class="woo-exists">Synced</span>');
+                    
+                    // Update stock value if available
                     if (response.data.stock !== undefined) {
-                        $button.closest('tr').find('td:nth-child(4)').html(
-                            response.data.stock + ' <span class="wc-data">(WC: ' + response.data.stock + ')</span>'
-                        );
+                        $row.find('td:nth-child(4)').text(response.data.stock);
                     }
                     
+                    // Update price display with VAT
                     if (response.data.price !== undefined) {
-                        $button.closest('tr').find('td:nth-child(5)').html(
-                            $button.closest('tr').find('td:nth-child(5)').text().split('(')[0] + 
-                            ' <span class="wc-data">(WC: ' + response.data.price + ' with ' + response.data.vat_rate + '% VAT)</span>'
-                        );
+                        // Get the base price from the existing cell
+                        var basePrice = $row.find('td:nth-child(5)').text();
+                        // Update the VAT price cell
+                        $row.find('td:nth-child(6)').html(response.data.price + ' (' + response.data.vat_rate + '%)');
                     }
                     
                     $button.prop('disabled', false).text('Synced!');
@@ -404,6 +422,75 @@ jQuery(document).ready(function($) {
             error: function(xhr, status, error) {
                 alert('Ajax Error: ' + error);
                 $button.prop('disabled', false).text('Retry Sync');
+            }
+        });
+    });
+
+    // Handle create in WooCommerce button
+    $(document).on('click', '.create-in-wc', function() {
+        var $button = $(this);
+        var productId = $button.data('product-id');
+        var productCode = $button.data('product-code');
+        var productName = $button.data('product-name');
+        var productPrice = $button.data('product-price');
+        var productStock = $button.data('product-stock');
+        var vatRate = $button.data('vat-rate');
+        
+        if (!confirm('Create product "' + decodeURIComponent(productName) + '" in WooCommerce?')) {
+            return;
+        }
+        
+        $button.prop('disabled', true).text('Creating...');
+        
+        $.ajax({
+            url: pohodaAdmin.ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'create_wc_product',
+                nonce: pohodaAdmin.nonce,
+                product_id: productId,
+                product_code: productCode,
+                product_name: productName,
+                product_price: productPrice,
+                product_stock: productStock,
+                vat_rate: vatRate
+            },
+            success: function(response) {
+                if (response.success) {
+                    // Update row in the DOM
+                    var $row = $button.closest('tr');
+                    $row.removeClass('pohoda-row-missing')
+                        .addClass('pohoda-row-match');
+                    
+                    // Update status cell
+                    $row.find('td:nth-child(7)').html('<span class="woo-exists">Synced</span>');
+                    
+                    // Replace action buttons
+                    var actionHtml = '<button class="button button-primary sync-db-product" data-product-id="' + 
+                        productId + '" data-vat-rate="' + vatRate + '">Sync</button>';
+                    
+                    // Add view and edit links if we have the URLs
+                    if (response.data && response.data.product_id) {
+                        var frontendUrl = '/?p=' + response.data.product_id;
+                        var editUrl = response.data.edit_url || 'post.php?post=' + response.data.product_id + '&action=edit';
+                        
+                        actionHtml += ' <a href="' + frontendUrl + '" target="_blank" class="button view-woo-button" ' +
+                            'title="View product on frontend"><span class="dashicons dashicons-visibility"></span></a>';
+                        actionHtml += ' <a href="' + editUrl + '" target="_blank" class="button edit-woo-button" ' +
+                            'title="Edit in WooCommerce admin"><span class="dashicons dashicons-edit"></span></a>';
+                    }
+                    
+                    $row.find('td:last-child').html(actionHtml);
+                    
+                    alert('Product created successfully!');
+                } else {
+                    alert('Error: ' + response.data);
+                    $button.prop('disabled', false).text('Create in WC');
+                }
+            },
+            error: function() {
+                alert('Failed to create product. Please try again.');
+                $button.prop('disabled', false).text('Create in WC');
             }
         });
     });
@@ -562,4 +649,356 @@ jQuery(document).ready(function($) {
         // Display modal
         $('#product-details-modal').show();
     });
+
+    // Handle sync all mismatched products button
+    $('#sync-all-mismatched').on('click', function() {
+        if (!confirm('This will sync all mismatched products from Pohoda to WooCommerce. Continue?')) {
+            return;
+        }
+        
+        var $button = $(this);
+        var $progress = $('#sync-progress');
+        var $progressBar = $progress.find('.progress-bar-inner');
+        var $progressCurrent = $('#progress-current');
+        var $progressTotal = $('#progress-total');
+        
+        $button.prop('disabled', true);
+        $progress.show();
+        $progressBar.css('width', '0%');
+        $progressCurrent.text('0');
+        $progressTotal.text('Loading...');
+        
+        // First, get ALL mismatched products across all pages
+        $.ajax({
+            url: pohodaAdmin.ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'get_all_mismatched_products',
+                nonce: pohodaAdmin.nonce
+            },
+            success: function(response) {
+                console.log('Full response from get_all_mismatched_products:', response);
+                
+                if (response.success && response.data) {
+                    var debug = response.data.debug || {};
+                    console.log('Debug info:', debug);
+                    
+                    // Check if products array exists
+                    if (!response.data.products || !Array.isArray(response.data.products)) {
+                        console.error('Invalid products data:', response.data);
+                        alert('Error: Invalid product data returned from server. Check console for details.');
+                        $button.prop('disabled', false);
+                        $progress.hide();
+                        return;
+                    }
+                    
+                    var mismatchedProducts = response.data.products;
+                    var totalProducts = mismatchedProducts.length;
+                    
+                    console.log('Mismatched products found:', totalProducts);
+                    
+                    if (totalProducts === 0) {
+                        // Show more detailed debug message
+                        var errorMessage = 'No mismatched products found. ';
+                        if (debug.pages_processed) {
+                            errorMessage += 'Server processed ' + debug.pages_processed + ' pages. ';
+                        }
+                        
+                        // Show status counts if available
+                        if (debug.page_results && debug.page_results.length > 0) {
+                            var firstPage = debug.page_results[0];
+                            if (firstPage.status_counts) {
+                                errorMessage += '\nProduct statuses: ';
+                                for (var status in firstPage.status_counts) {
+                                    errorMessage += status + ': ' + firstPage.status_counts[status] + ', ';
+                                }
+                            }
+                        }
+                        
+                        alert(errorMessage);
+                        $button.prop('disabled', false);
+                        $progress.hide();
+                        return;
+                    }
+                    
+                    var processedProducts = 0;
+                    $progressTotal.text(totalProducts);
+                    $progressCurrent.text(processedProducts);
+                    
+                    // Process products one by one
+                    function syncNextProduct(index) {
+                        if (index >= totalProducts) {
+                            // All products processed
+                            $button.prop('disabled', false);
+                            alert('All ' + totalProducts + ' mismatched products have been synced!');
+                            $progress.hide();
+                            return;
+                        }
+                        
+                        var product = mismatchedProducts[index];
+                        console.log('Syncing product:', product.id, product.name);
+                        
+                        $.ajax({
+                            url: pohodaAdmin.ajaxurl,
+                            type: 'POST',
+                            data: {
+                                action: 'sync_db_product',
+                                nonce: pohodaAdmin.nonce,
+                                product_id: product.id,
+                                vat_rate: product.vat_rate || 21
+                            },
+                            success: function(syncResponse) {
+                                processedProducts++;
+                                $progressCurrent.text(processedProducts);
+                                $progressBar.css('width', (processedProducts / totalProducts * 100) + '%');
+                                
+                                console.log('Product synced:', product.id, 'Progress:', processedProducts + '/' + totalProducts);
+                                
+                                // Update row in DOM if it exists
+                                var $row = $('tr').filter(function() {
+                                    return $(this).find('td:first-child').text() == product.id;
+                                });
+                                
+                                if ($row.length) {
+                                    // Update row appearance
+                                    $row.removeClass('pohoda-row-mismatch pohoda-row-unknown')
+                                        .addClass('pohoda-row-match');
+                                    
+                                    // Update status cell
+                                    $row.find('td:nth-child(7)').html('<span class="woo-exists">Synced</span>');
+                                    
+                                    // Update stock and price display if available in response
+                                    if (syncResponse.success && syncResponse.data) {
+                                        if (syncResponse.data.stock !== undefined) {
+                                            $row.find('td:nth-child(4)').text(syncResponse.data.stock);
+                                        }
+                                        
+                                        if (syncResponse.data.price !== undefined) {
+                                            $row.find('td:nth-child(6)').html(
+                                                syncResponse.data.price + ' (' + syncResponse.data.vat_rate + '%)'
+                                            );
+                                        }
+                                    }
+                                }
+                                
+                                // Process next product after a small delay to avoid overwhelming the server
+                                setTimeout(function() {
+                                    syncNextProduct(index + 1);
+                                }, 50);
+                            },
+                            error: function(xhr, status, error) {
+                                console.error('Error syncing product:', product.id, error);
+                                
+                                // Continue with next product even if this one fails
+                                processedProducts++;
+                                $progressCurrent.text(processedProducts);
+                                $progressBar.css('width', (processedProducts / totalProducts * 100) + '%');
+                                
+                                setTimeout(function() {
+                                    syncNextProduct(index + 1);
+                                }, 50);
+                            }
+                        });
+                    }
+                    
+                    // Start processing
+                    syncNextProduct(0);
+                } else {
+                    console.error('Failed to retrieve mismatched products:', response);
+                    
+                    // Show more detailed error message
+                    var errorMessage = 'Failed to retrieve mismatched products. ';
+                    if (response.data && response.data.debug) {
+                        errorMessage += 'Debug info: ' + JSON.stringify(response.data.debug);
+                    }
+                    
+                    alert(errorMessage);
+                    $button.prop('disabled', false);
+                    $progress.hide();
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error('AJAX error:', error, xhr.responseText);
+                alert('Error: ' + error);
+                $button.prop('disabled', false);
+                $progress.hide();
+            }
+        });
+    });
+
+    // Handle create all missing products button
+    $('#create-all-missing').on('click', function() {
+        if (!confirm('This will create WooCommerce products for all missing items. Continue?')) {
+            return;
+        }
+        
+        var $button = $(this);
+        var $progress = $('#sync-progress');
+        var $progressBar = $progress.find('.progress-bar-inner');
+        var $progressCurrent = $('#progress-current');
+        var $progressTotal = $('#progress-total');
+        
+        $button.prop('disabled', true);
+        $progress.show();
+        $progressBar.css('width', '0%');
+        $progressCurrent.text('0');
+        $progressTotal.text('Loading...');
+        
+        // Get all missing products first
+        $.ajax({
+            url: pohodaAdmin.ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'get_all_missing_products',
+                nonce: pohodaAdmin.nonce
+            },
+            success: function(response) {
+                if (response.success && response.data && response.data.products) {
+                    var missingProducts = response.data.products;
+                    var totalProducts = missingProducts.length;
+                    
+                    if (totalProducts === 0) {
+                        alert('No missing products found.');
+                        $button.prop('disabled', false);
+                        $progress.hide();
+                        return;
+                    }
+                    
+                    $progressTotal.text(totalProducts);
+                    
+                    // Track the results
+                    var totalCreated = 0;
+                    var totalFailed = 0;
+                    var allErrors = [];
+                    
+                    // Process products in batches
+                    function processBatch(startIndex) {
+                        if (startIndex >= totalProducts) {
+                            // All products processed
+                            $button.prop('disabled', false);
+                            $progressBar.css('width', '100%');
+                            
+                            var message = 'Created ' + totalCreated + ' products. Failed: ' + totalFailed;
+                            if (totalFailed > 0 && allErrors.length > 0) {
+                                message += '\n\nErrors:\n' + allErrors.join('\n');
+                            }
+                            
+                            alert(message);
+                            
+                            // Update rows in the DOM for successfully created products
+                            updateRowsInDom();
+                            
+                            $progress.hide();
+                            return;
+                        }
+                        
+                        var batchSize = 20; // Process in smaller batches to avoid timeouts
+                        
+                        $.ajax({
+                            url: pohodaAdmin.ajaxurl,
+                            type: 'POST',
+                            data: {
+                                action: 'create_all_missing_products',
+                                nonce: pohodaAdmin.nonce,
+                                products: missingProducts,
+                                start_index: startIndex,
+                                batch_size: batchSize,
+                                total: totalProducts
+                            },
+                            success: function(batchResponse) {
+                                if (batchResponse.success) {
+                                    var result = batchResponse.data;
+                                    
+                                    // Accumulate results
+                                    totalCreated += result.created;
+                                    totalFailed += result.failed;
+                                    
+                                    if (result.errors && result.errors.length > 0) {
+                                        allErrors = allErrors.concat(result.errors);
+                                    }
+                                    
+                                    // Update progress
+                                    $progressCurrent.text(result.end_index);
+                                    $progressBar.css('width', (result.end_index / totalProducts * 100) + '%');
+                                    
+                                    // Process next batch after a small delay
+                                    setTimeout(function() {
+                                        processBatch(result.end_index);
+                                    }, 100);
+                                } else {
+                                    alert('Error processing batch: ' + (batchResponse.data || 'Unknown error'));
+                                    $button.prop('disabled', false);
+                                    $progress.hide();
+                                }
+                            },
+                            error: function(xhr, status, error) {
+                                alert('Error: ' + error);
+                                $button.prop('disabled', false);
+                                $progress.hide();
+                            }
+                        });
+                    }
+                    
+                    // Function to update DOM for created products
+                    function updateRowsInDom() {
+                        if (totalCreated === 0) return;
+                        
+                        // Get product IDs that were successfully created
+                        var createdIds = [];
+                        for (var i = 0; i < missingProducts.length; i++) {
+                            var productId = missingProducts[i].id;
+                            // If the product isn't in the error list, assume it was created
+                            var hasError = allErrors.some(function(error) {
+                                return error.indexOf('Product ID ' + productId + ':') >= 0 ||
+                                       error.indexOf('(code: ' + missingProducts[i].code + ')') >= 0;
+                            });
+                            
+                            if (!hasError) {
+                                createdIds.push(productId);
+                            }
+                        }
+                        
+                        // Update visible rows
+                        $('tr.pohoda-row-missing').each(function() {
+                            var $row = $(this);
+                            var productId = $row.find('td:first-child').text();
+                            
+                            // If this was one of the created products
+                            if (createdIds.indexOf(productId) !== -1) {
+                                // Update status
+                                $row.removeClass('pohoda-row-missing').addClass('pohoda-row-match');
+                                $row.find('td:nth-child(7)').html('<span class="woo-exists">Synced</span>');
+                                
+                                // Update actions cell with sync button
+                                var vatRate = 21; // Default
+                                if ($row.find('td:nth-child(6)').text().match(/\(([^)]+)%\)/)) {
+                                    vatRate = $row.find('td:nth-child(6)').text().match(/\(([^)]+)%\)/)[1];
+                                }
+                                
+                                var actionHtml = '<button class="button button-primary sync-db-product" ' +
+                                    'data-product-id="' + productId + '" data-vat-rate="' + vatRate + '">Sync</button>';
+                                
+                                $row.find('td:last-child').html(actionHtml);
+                            }
+                        });
+                    }
+                    
+                    // Start processing batches
+                    processBatch(0);
+                } else {
+                    alert('Error: ' + (response.data || 'Failed to retrieve missing products'));
+                    $button.prop('disabled', false);
+                    $progress.hide();
+                }
+            },
+            error: function(xhr, status, error) {
+                alert('Error: ' + error);
+                $button.prop('disabled', false);
+                $progress.hide();
+            }
+        });
+    });
+
+    // Make loadDbProducts available globally
+    window.loadDbProducts = loadDbProducts;
 }); 
