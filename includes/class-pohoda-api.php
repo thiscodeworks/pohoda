@@ -71,7 +71,10 @@ class Pohoda_API {
                 $search = iconv('UTF-8', 'Windows-1250//TRANSLIT', $params['search']);
                 $search = htmlspecialchars($search, ENT_XML1, 'Windows-1250');
                 $xmlRequest .= '<ftr:code>' . $search . '</ftr:code>';
-                $xmlRequest .= '<ftr:name>' . $search . '</ftr:name>';
+                // Only search by name if specifically requested or if we're not doing a code-only search
+                if (!isset($params['code_only']) || !$params['code_only']) {
+                    $xmlRequest .= '<ftr:name>' . $search . '</ftr:name>';
+                }
             }
             
             if (!empty($params['type'])) {
@@ -185,6 +188,87 @@ class Pohoda_API {
                     $count = $xpath->query('./stk:count', $stockHeader)->item(0);
                     $purchasingPrice = $xpath->query('./stk:purchasingPrice', $stockHeader)->item(0);
                     $sellingPrice = $xpath->query('./stk:sellingPrice', $stockHeader)->item(0);
+                    $sellingRateVAT = $xpath->query('./stk:sellingRateVAT', $stockHeader)->item(0);
+                    
+                    // Determine VAT rate percentage
+                    $vatRate = 21; // Default 21%
+                    if ($sellingRateVAT) {
+                        $vatRateValue = $sellingRateVAT->nodeValue;
+                        if ($vatRateValue === 'high') {
+                            $vatRate = 21; // high rate in Czech Republic
+                        } elseif ($vatRateValue === 'low') {
+                            $vatRate = 15; // low rate in Czech Republic
+                        } elseif ($vatRateValue === 'third') {
+                            $vatRate = 10; // third rate in Czech Republic
+                        } elseif ($vatRateValue === 'none') {
+                            $vatRate = 0; // no VAT
+                        }
+                    }
+                    
+                    // Get related files
+                    $relatedFiles = array();
+                    $relatedFilesNode = $xpath->query('./stk:relatedFiles/stk:relatedFile', $item);
+                    if ($relatedFilesNode && $relatedFilesNode->length > 0) {
+                        foreach ($relatedFilesNode as $fileNode) {
+                            $filepath = $xpath->query('./stk:filepath', $fileNode)->item(0);
+                            $description = $xpath->query('./stk:description', $fileNode)->item(0);
+                            $order = $xpath->query('./stk:order', $fileNode)->item(0);
+                            
+                            $relatedFiles[] = array(
+                                'filepath' => $filepath ? $filepath->nodeValue : '',
+                                'description' => $description ? $description->nodeValue : '',
+                                'order' => $order ? (int)$order->nodeValue : 0
+                            );
+                        }
+                    }
+                    
+                    // Get pictures
+                    $pictures = array();
+                    $picturesNode = $xpath->query('./stk:pictures/stk:picture', $item);
+                    if ($picturesNode && $picturesNode->length > 0) {
+                        foreach ($picturesNode as $pictureNode) {
+                            $pictureId = $xpath->query('./stk:id', $pictureNode)->item(0);
+                            $filepath = $xpath->query('./stk:filepath', $pictureNode)->item(0);
+                            $description = $xpath->query('./stk:description', $pictureNode)->item(0);
+                            $order = $xpath->query('./stk:order', $pictureNode)->item(0);
+                            $default = $pictureNode->getAttribute('default') === 'true';
+                            
+                            $pictures[] = array(
+                                'id' => $pictureId ? (int)$pictureId->nodeValue : 0,
+                                'filepath' => $filepath ? $filepath->nodeValue : '',
+                                'description' => $description ? $description->nodeValue : '',
+                                'order' => $order ? (int)$order->nodeValue : 0,
+                                'default' => $default
+                            );
+                        }
+                    }
+                    
+                    // Get categories
+                    $categories = array();
+                    $categoriesNode = $xpath->query('./stk:categories/stk:idCategory', $item);
+                    if ($categoriesNode && $categoriesNode->length > 0) {
+                        foreach ($categoriesNode as $categoryNode) {
+                            $categories[] = (int)$categoryNode->nodeValue;
+                        }
+                    }
+                    
+                    // Get related stocks
+                    $relatedStocks = array();
+                    $relatedStocksNode = $xpath->query('./stk:relatedStocks/stk:idStocks', $item);
+                    if ($relatedStocksNode && $relatedStocksNode->length > 0) {
+                        foreach ($relatedStocksNode as $stockNode) {
+                            $relatedStocks[] = (int)$stockNode->nodeValue;
+                        }
+                    }
+                    
+                    // Get alternative stocks
+                    $alternativeStocks = array();
+                    $alternativeStocksNode = $xpath->query('./stk:alternativeStocks/stk:idStocks', $item);
+                    if ($alternativeStocksNode && $alternativeStocksNode->length > 0) {
+                        foreach ($alternativeStocksNode as $stockNode) {
+                            $alternativeStocks[] = (int)$stockNode->nodeValue;
+                        }
+                    }
                     
                     $product = array(
                         'id' => $id,
@@ -196,6 +280,12 @@ class Pohoda_API {
                         'count' => $count ? (float)$count->nodeValue : 0,
                         'purchasing_price' => $purchasingPrice ? (float)$purchasingPrice->nodeValue : 0,
                         'selling_price' => $sellingPrice ? (float)$sellingPrice->nodeValue : 0,
+                        'vat_rate' => $vatRate,
+                        'related_files' => $relatedFiles,
+                        'pictures' => $pictures,
+                        'categories' => $categories,
+                        'related_stocks' => $relatedStocks,
+                        'alternative_stocks' => $alternativeStocks,
                         'price_variants' => array()
                     );
                     
@@ -621,5 +711,418 @@ XML;
         }
         
         return $products;
+    }
+
+    /**
+     * Create local database tables for storing products
+     */
+    public function create_db_tables() {
+        global $wpdb;
+        
+        $charset_collate = $wpdb->get_charset_collate();
+        $table_name = $wpdb->prefix . 'pohoda_products';
+        
+        // Check if table exists
+        if ($wpdb->get_var("SHOW TABLES LIKE '$table_name'") != $table_name) {
+            $sql = "CREATE TABLE $table_name (
+                id bigint(20) NOT NULL,
+                code varchar(255) NOT NULL,
+                name text NOT NULL,
+                unit varchar(20) DEFAULT '',
+                type varchar(50) DEFAULT '',
+                storage varchar(50) DEFAULT '',
+                count float DEFAULT 0,
+                purchasing_price decimal(15,4) DEFAULT 0,
+                selling_price decimal(15,4) DEFAULT 0,
+                vat_rate int(3) DEFAULT 21,
+                related_files longtext DEFAULT NULL,
+                pictures longtext DEFAULT NULL,
+                categories longtext DEFAULT NULL,
+                related_stocks longtext DEFAULT NULL,
+                alternative_stocks longtext DEFAULT NULL,
+                price_variants longtext DEFAULT NULL,
+                woocommerce_exists tinyint(1) DEFAULT 0,
+                woocommerce_id bigint(20) DEFAULT 0,
+                woocommerce_url varchar(255) DEFAULT '',
+                woocommerce_stock varchar(50) DEFAULT '',
+                woocommerce_price varchar(50) DEFAULT '',
+                comparison_status varchar(50) DEFAULT 'missing',
+                last_updated datetime DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY  (id),
+                UNIQUE KEY code (code),
+                KEY storage (storage),
+                KEY type (type),
+                KEY woocommerce_exists (woocommerce_exists),
+                KEY comparison_status (comparison_status)
+            ) $charset_collate;";
+            
+            require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+            dbDelta($sql);
+            
+            return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Sync all products from Pohoda to local database
+     * 
+     * @param int $batch_size Number of products to fetch per API call
+     * @param int $start_id ID to start from (for resuming batch operations)
+     * @return array Result of the sync operation
+     */
+    public function sync_products_to_db($batch_size = 100, $start_id = 0) {
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'pohoda_products';
+        
+        // Ensure the table exists
+        $this->create_db_tables();
+        
+        // Initialize results
+        $results = [
+            'total_fetched' => 0,
+            'total_inserted' => 0,
+            'total_updated' => 0,
+            'last_id' => $start_id,
+            'has_more' => true,
+            'errors' => []
+        ];
+        
+        try {
+            // Fetch products from Pohoda in batches
+            $params = [
+                'per_page' => $batch_size,
+                'page' => 1,
+                'id_from' => $start_id,
+                'check_woocommerce' => true
+            ];
+            
+            $response = $this->get_products($params);
+            
+            if (!$response || !isset($response['success']) || !$response['success']) {
+                $results['errors'][] = 'Failed to get products from Pohoda API';
+                $results['has_more'] = false;
+                return $results;
+            }
+            
+            $products = $response['data'];
+            $results['total_fetched'] = count($products);
+            
+            if (empty($products)) {
+                $results['has_more'] = false;
+                return $results;
+            }
+            
+            // Update the last_id for the next batch
+            if (isset($response['pagination']) && isset($response['pagination']['last_id'])) {
+                $results['last_id'] = $response['pagination']['last_id'];
+                $results['has_more'] = $response['pagination']['has_more'];
+            }
+            
+            // Process each product
+            foreach ($products as $product) {
+                // Check if product exists
+                $exists = $wpdb->get_var($wpdb->prepare("SELECT id FROM $table_name WHERE id = %d", $product['id']));
+                
+                // Prepare data for database
+                $data = [
+                    'id' => $product['id'],
+                    'code' => $product['code'],
+                    'name' => $product['name'],
+                    'unit' => $product['unit'],
+                    'type' => $product['type'],
+                    'storage' => $product['storage'],
+                    'count' => $product['count'],
+                    'purchasing_price' => $product['purchasing_price'],
+                    'selling_price' => $product['selling_price'],
+                    'vat_rate' => $product['vat_rate'],
+                    'related_files' => !empty($product['related_files']) ? json_encode($product['related_files']) : null,
+                    'pictures' => !empty($product['pictures']) ? json_encode($product['pictures']) : null,
+                    'categories' => !empty($product['categories']) ? json_encode($product['categories']) : null,
+                    'related_stocks' => !empty($product['related_stocks']) ? json_encode($product['related_stocks']) : null,
+                    'alternative_stocks' => !empty($product['alternative_stocks']) ? json_encode($product['alternative_stocks']) : null,
+                    'price_variants' => !empty($product['price_variants']) ? json_encode($product['price_variants']) : null,
+                    'woocommerce_exists' => isset($product['woocommerce_exists']) ? $product['woocommerce_exists'] : 0,
+                    'woocommerce_id' => isset($product['woocommerce_id']) ? $product['woocommerce_id'] : 0,
+                    'woocommerce_url' => isset($product['woocommerce_url']) ? $product['woocommerce_url'] : '',
+                    'woocommerce_stock' => isset($product['woocommerce_stock']) ? $product['woocommerce_stock'] : '',
+                    'woocommerce_price' => isset($product['woocommerce_price']) ? $product['woocommerce_price'] : '',
+                    'comparison_status' => isset($product['comparison_status']) ? $product['comparison_status'] : 'missing',
+                    'last_updated' => current_time('mysql')
+                ];
+                
+                $format = [
+                    '%d', '%s', '%s', '%s', '%s', '%s', '%f', '%f', '%f', '%d',
+                    '%s', '%s', '%s', '%s', '%s', '%s',
+                    '%d', '%d', '%s', '%s', '%s', '%s', '%s'
+                ];
+                
+                if ($exists) {
+                    // Update existing record
+                    $wpdb->update(
+                        $table_name,
+                        $data,
+                        ['id' => $product['id']],
+                        $format,
+                        ['%d']
+                    );
+                    $results['total_updated']++;
+                } else {
+                    // Insert new record
+                    $wpdb->insert(
+                        $table_name,
+                        $data,
+                        $format
+                    );
+                    $results['total_inserted']++;
+                }
+            }
+            
+            return $results;
+            
+        } catch (Exception $e) {
+            $results['errors'][] = 'Exception: ' . $e->getMessage();
+            return $results;
+        }
+    }
+    
+    /**
+     * Get products from local database with filtering and pagination
+     * 
+     * @param array $params Query parameters
+     * @return array Products with pagination info
+     */
+    public function get_products_from_db($params = []) {
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'pohoda_products';
+        
+        // Default parameters
+        $defaults = [
+            'search' => '',
+            'type' => '',
+            'storage' => '',
+            'per_page' => 10,
+            'page' => 1,
+            'check_woocommerce' => true,
+            'order_by' => 'id',
+            'order' => 'ASC',
+            'comparison_status' => ''
+        ];
+        
+        $params = wp_parse_args($params, $defaults);
+        
+        // Build query
+        $where = [];
+        $where_values = [];
+        
+        if (!empty($params['search'])) {
+            $where[] = '(code LIKE %s OR name LIKE %s)';
+            $search_term = '%' . $wpdb->esc_like($params['search']) . '%';
+            $where_values[] = $search_term;
+            $where_values[] = $search_term;
+        }
+        
+        if (!empty($params['type'])) {
+            $where[] = 'type = %s';
+            $where_values[] = $params['type'];
+        }
+        
+        if (!empty($params['storage'])) {
+            $where[] = 'storage = %s';
+            $where_values[] = $params['storage'];
+        }
+        
+        if (!empty($params['comparison_status'])) {
+            $where[] = 'comparison_status = %s';
+            $where_values[] = $params['comparison_status'];
+        }
+        
+        $where_clause = '';
+        if (!empty($where)) {
+            $where_clause = 'WHERE ' . implode(' AND ', $where);
+        }
+        
+        // Validate order_by column
+        $allowed_columns = ['id', 'code', 'name', 'count', 'selling_price', 'comparison_status', 'last_updated'];
+        if (!in_array($params['order_by'], $allowed_columns)) {
+            $params['order_by'] = 'id';
+        }
+        
+        // Validate order direction
+        $order = strtoupper($params['order']) === 'DESC' ? 'DESC' : 'ASC';
+        
+        // Calculate pagination
+        $offset = ($params['page'] - 1) * $params['per_page'];
+        
+        // Prepare query
+        $query = $wpdb->prepare(
+            "SELECT * FROM $table_name $where_clause ORDER BY {$params['order_by']} $order LIMIT %d OFFSET %d",
+            array_merge($where_values, [$params['per_page'], $offset])
+        );
+        
+        // Get total count for pagination
+        $count_query = "SELECT COUNT(*) FROM $table_name $where_clause";
+        if (!empty($where_values)) {
+            $count_query = $wpdb->prepare($count_query, $where_values);
+        }
+        $total_items = $wpdb->get_var($count_query);
+        
+        // Execute query
+        $products = $wpdb->get_results($query, ARRAY_A);
+        
+        // Process products
+        $processed_products = [];
+        foreach ($products as $product) {
+            // Convert JSON fields back to arrays
+            $json_fields = ['related_files', 'pictures', 'categories', 'related_stocks', 'alternative_stocks', 'price_variants'];
+            foreach ($json_fields as $field) {
+                if (!empty($product[$field])) {
+                    $product[$field] = json_decode($product[$field], true);
+                } else {
+                    $product[$field] = [];
+                }
+            }
+            
+            // Convert numeric values
+            $product['count'] = (float) $product['count'];
+            $product['purchasing_price'] = (float) $product['purchasing_price'];
+            $product['selling_price'] = (float) $product['selling_price'];
+            $product['woocommerce_exists'] = (bool) $product['woocommerce_exists'];
+            $product['woocommerce_id'] = (int) $product['woocommerce_id'];
+            
+            $processed_products[] = $product;
+        }
+        
+        // Prepare pagination data
+        $total_pages = ceil($total_items / $params['per_page']);
+        
+        return [
+            'success' => true,
+            'data' => $processed_products,
+            'pagination' => [
+                'total' => (int) $total_items,
+                'per_page' => (int) $params['per_page'],
+                'current_page' => (int) $params['page'],
+                'last_page' => $total_pages,
+                'from' => $offset + 1,
+                'to' => min($offset + $params['per_page'], $total_items),
+                'has_more' => $params['page'] < $total_pages
+            ]
+        ];
+    }
+    
+    /**
+     * Refresh WooCommerce data for products in database
+     */
+    public function refresh_woocommerce_data() {
+        global $wpdb;
+        $table_name = $wpdb->prefix . 'pohoda_products';
+        
+        // Get all product codes
+        $products = $wpdb->get_results("SELECT id, code FROM $table_name", ARRAY_A);
+        
+        if (empty($products)) {
+            return [
+                'success' => false,
+                'message' => 'No products found in database'
+            ];
+        }
+        
+        $total_updated = 0;
+        $codes = array_column($products, 'code');
+        
+        // Format codes for SQL IN clause
+        $codes_placeholders = implode(',', array_fill(0, count($codes), '%s'));
+        $query = $wpdb->prepare(
+            "SELECT p.ID, pm.meta_value AS sku
+            FROM {$wpdb->posts} p
+            JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id
+            WHERE pm.meta_key = '_sku'
+            AND pm.meta_value IN ($codes_placeholders)
+            AND p.post_type IN ('product', 'product_variation')
+            AND p.post_status = 'publish'",
+            $codes
+        );
+        
+        // Get all products with matching SKUs
+        $wc_products = $wpdb->get_results($query, ARRAY_A);
+        
+        // Create lookup array for quick access
+        $sku_to_product = [];
+        foreach ($wc_products as $wc_product) {
+            $sku_to_product[$wc_product['sku']] = $wc_product['ID'];
+        }
+        
+        // Update each product in our database
+        foreach ($products as $product) {
+            $wc_exists = isset($sku_to_product[$product['code']]);
+            $data = [
+                'woocommerce_exists' => $wc_exists ? 1 : 0,
+                'last_updated' => current_time('mysql')
+            ];
+            
+            if ($wc_exists) {
+                $wc_id = $sku_to_product[$product['code']];
+                $wc_product = wc_get_product($wc_id);
+                
+                if ($wc_product) {
+                    // Get WooCommerce product data
+                    $data['woocommerce_id'] = $wc_id;
+                    $data['woocommerce_url'] = get_edit_post_link($wc_id, '');
+                    
+                    // Get stock and price data
+                    $wc_stock = $wc_product->get_stock_quantity();
+                    $data['woocommerce_stock'] = $wc_stock !== null ? (string)$wc_stock : '';
+                    
+                    $wc_price = $wc_product->get_regular_price();
+                    $data['woocommerce_price'] = $wc_price;
+                    
+                    // Compare with Pohoda data
+                    $pohoda_data = $wpdb->get_row($wpdb->prepare(
+                        "SELECT count, selling_price FROM $table_name WHERE code = %s",
+                        $product['code']
+                    ), ARRAY_A);
+                    
+                    if ($pohoda_data) {
+                        $stock_diff = abs(($wc_stock !== null ? (float)$wc_stock : 0) - (float)$pohoda_data['count']);
+                        $stock_match = $stock_diff <= 0.001;
+                        
+                        $price_diff = abs(($wc_price !== '' ? (float)$wc_price : 0) - (float)$pohoda_data['selling_price']);
+                        $price_match = $price_diff <= 0.01;
+                        
+                        if ($stock_match && $price_match) {
+                            $data['comparison_status'] = 'match';
+                        } else {
+                            $data['comparison_status'] = 'mismatch';
+                        }
+                    } else {
+                        $data['comparison_status'] = 'unknown';
+                    }
+                } else {
+                    $data['comparison_status'] = 'unknown';
+                }
+            } else {
+                $data['woocommerce_id'] = 0;
+                $data['woocommerce_url'] = '';
+                $data['woocommerce_stock'] = '';
+                $data['woocommerce_price'] = '';
+                $data['comparison_status'] = 'missing';
+            }
+            
+            // Update database
+            $wpdb->update(
+                $table_name,
+                $data,
+                ['id' => $product['id']]
+            );
+            
+            $total_updated++;
+        }
+        
+        return [
+            'success' => true,
+            'updated' => $total_updated
+        ];
     }
 } 

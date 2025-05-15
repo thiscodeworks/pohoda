@@ -6,6 +6,7 @@ if (!defined('ABSPATH')) {
 class Pohoda_Admin {
     private $options;
     private $api;
+    private $db;
 
     public function __construct() {
         add_action('admin_menu', array($this, 'add_plugin_page'));
@@ -15,10 +16,17 @@ class Pohoda_Admin {
         add_action('wp_ajax_load_pohoda_orders', array($this, 'load_orders'));
         add_action('wp_ajax_send_pohoda_xml', array($this, 'send_xml'));
         add_action('wp_ajax_load_stores', array($this, 'load_stores'));
+        add_action('wp_ajax_sync_pohoda_product', array($this, 'sync_product'));
+        add_action('wp_ajax_sync_db_product', array($this, 'sync_db_product'));
+        add_action('wp_ajax_sync_db_products', array($this, 'sync_db_products'));
+        add_action('wp_ajax_get_db_products', array($this, 'get_db_products'));
+        add_action('wp_ajax_refresh_wc_data', array($this, 'refresh_wc_data'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_scripts'));
 
         require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-pohoda-api.php';
+        require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-pohoda-db.php';
         $this->api = new Pohoda_API();
+        $this->db = new Pohoda_DB();
     }
 
     public function add_plugin_page() {
@@ -42,6 +50,7 @@ class Pohoda_Admin {
             <h2 class="nav-tab-wrapper">
                 <a href="?page=pohoda-settings&tab=settings" class="nav-tab <?php echo $active_tab == 'settings' ? 'nav-tab-active' : ''; ?>">Nastavení</a>
                 <a href="?page=pohoda-settings&tab=products" class="nav-tab <?php echo $active_tab == 'products' ? 'nav-tab-active' : ''; ?>">Produkty</a>
+                <a href="?page=pohoda-settings&tab=db_products" class="nav-tab <?php echo $active_tab == 'db_products' ? 'nav-tab-active' : ''; ?>">DB Produkty</a>
                 <a href="?page=pohoda-settings&tab=stores" class="nav-tab <?php echo $active_tab == 'stores' ? 'nav-tab-active' : ''; ?>">Sklady</a>
                 <a href="?page=pohoda-settings&tab=orders" class="nav-tab <?php echo $active_tab == 'orders' ? 'nav-tab-active' : ''; ?>">Objednávky</a>
                 <a href="?page=pohoda-settings&tab=pohyby" class="nav-tab <?php echo $active_tab == 'pohyby' ? 'nav-tab-active' : ''; ?>">Pohyby</a>
@@ -154,6 +163,109 @@ class Pohoda_Admin {
                         justify-content: center;
                     }
                     #page-info {
+                        min-width: 100px;
+                        text-align: center;
+                    }
+                </style>
+            <?php } elseif($active_tab == 'db_products') { ?>
+                <h2>Database Products</h2>
+                <div class="pohoda-products-container">
+                    <div class="pohoda-actions">
+                        <button id="sync-all-products" class="button button-primary">Sync All Products from Pohoda</button>
+                        <button id="refresh-wc-data" class="button">Refresh WooCommerce Data</button>
+                    </div>
+                    <div id="sync-progress" style="margin-top: 10px; display: none;">
+                        <div class="progress-bar">
+                            <div class="progress-bar-inner" style="width: 0%"></div>
+                        </div>
+                        <div class="progress-status">
+                            Processing: <span id="progress-current">0</span> / <span id="progress-total">0</span>
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="pohoda-filters">
+                        <div class="filter-group">
+                            <label for="db-product-search">Search:</label>
+                            <input type="text" id="db-product-search" placeholder="Search by name or code">
+                        </div>
+                        <div class="filter-group">
+                            <label for="db-product-type">Type:</label>
+                            <select id="db-product-type">
+                                <option value="">All Types</option>
+                                <option value="material">Material</option>
+                                <option value="product">Product</option>
+                                <option value="service">Service</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="db-product-storage">Storage:</label>
+                            <select id="db-product-storage">
+                                <option value="">All Storages</option>
+                                <?php
+                                $stores = get_option('pohoda_stores', array());
+                                foreach ($stores as $store) {
+                                    echo '<option value="' . esc_attr($store['id']) . '">' . esc_html($store['name']) . '</option>';
+                                }
+                                ?>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="db-comparison-status">Status:</label>
+                            <select id="db-comparison-status">
+                                <option value="">All Statuses</option>
+                                <option value="match">Matched</option>
+                                <option value="mismatch">Mismatched</option>
+                                <option value="missing">Missing in WooCommerce</option>
+                                <option value="unknown">Unknown</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label for="db-products-per-page">Items per page:</label>
+                            <select id="db-products-per-page">
+                                <option value="10">10</option>
+                                <option value="25">25</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                            </select>
+                        </div>
+                        <button id="load-db-products" class="button button-primary">Load Products</button>
+                    </div>
+                    <div id="db-products-result" style="margin-top: 20px;"></div>
+                    <div class="db-pohoda-pagination" style="margin-top: 20px; display: none;">
+                        <button class="button" id="db-prev-page">Previous</button>
+                        <span id="db-page-info">Page 1 of 1</span>
+                        <button class="button" id="db-next-page">Next</button>
+                    </div>
+                </div>
+                <style>
+                    .pohoda-actions {
+                        display: flex;
+                        gap: 10px;
+                        margin-bottom: 20px;
+                    }
+                    .progress-bar {
+                        height: 20px;
+                        background-color: #f0f0f0;
+                        border-radius: 4px;
+                        margin-bottom: 10px;
+                        overflow: hidden;
+                    }
+                    .progress-bar-inner {
+                        height: 100%;
+                        background-color: #0073aa;
+                        transition: width 0.3s ease;
+                    }
+                    .progress-status {
+                        text-align: center;
+                        font-weight: bold;
+                    }
+                    .db-pohoda-pagination {
+                        display: flex;
+                        align-items: center;
+                        gap: 10px;
+                        justify-content: center;
+                    }
+                    #db-page-info {
                         min-width: 100px;
                         text-align: center;
                     }
@@ -581,6 +693,155 @@ class Pohoda_Admin {
         }
     }
 
+    /**
+     * Sync a Pohoda product with WooCommerce
+     */
+    public function sync_product() {
+        check_ajax_referer('pohoda_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized');
+            return;
+        }
+
+        $product_id = isset($_POST['product_id']) ? sanitize_text_field($_POST['product_id']) : '';
+        $product_code = isset($_POST['product_code']) ? sanitize_text_field($_POST['product_code']) : '';
+        $product_stock = isset($_POST['product_stock']) ? floatval($_POST['product_stock']) : 0;
+        $product_price = isset($_POST['product_price']) ? floatval($_POST['product_price']) : 0;
+        $product_vat = isset($_POST['product_vat']) ? intval($_POST['product_vat']) : 21;
+        
+        if (empty($product_code)) {
+            wp_send_json_error('Product code is required');
+            return;
+        }
+        
+        try {
+            // Check if the product exists in WooCommerce
+            $wc_product_id = wc_get_product_id_by_sku($product_code);
+            
+            if (!$wc_product_id) {
+                wp_send_json_error('Product not found in WooCommerce. SKU: ' . $product_code);
+                return;
+            }
+            
+            $wc_product = wc_get_product($wc_product_id);
+            
+            // Update stock
+            $wc_product->set_stock_quantity($product_stock);
+            $wc_product->set_stock_status($product_stock > 0 ? 'instock' : 'outofstock');
+            
+            // Calculate VAT multiplier based on the actual VAT rate from Pohoda
+            $vat_multiplier = 1 + ($product_vat / 100);
+            $price_with_vat = $product_price * $vat_multiplier;
+            
+            // Ceil to whole number
+            $final_price = ceil($price_with_vat);
+            
+            // Update price
+            $wc_product->set_regular_price($final_price);
+            
+            // Save the product
+            $wc_product->save();
+            
+            // Return success with updated data
+            wp_send_json_success(array(
+                'stock' => $product_stock,
+                'price' => $final_price,
+                'vat_rate' => $product_vat
+            ));
+            
+        } catch (Exception $e) {
+            wp_send_json_error('Exception: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Sync products from Pohoda to database
+     */
+    public function sync_db_products() {
+        check_ajax_referer('pohoda_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized');
+            return;
+        }
+
+        $batch_size = isset($_POST['batch_size']) ? intval($_POST['batch_size']) : 25;
+        $start_id = isset($_POST['start_id']) ? intval($_POST['start_id']) : 0;
+
+        $result = $this->db->sync_products($this->api, $batch_size, $start_id);
+
+        wp_send_json_success($result);
+    }
+
+    /**
+     * Get products from database
+     */
+    public function get_db_products() {
+        check_ajax_referer('pohoda_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized');
+            return;
+        }
+
+        $params = array(
+            'search' => isset($_POST['search']) ? sanitize_text_field($_POST['search']) : '',
+            'type' => isset($_POST['type']) ? sanitize_text_field($_POST['type']) : '',
+            'storage' => isset($_POST['storage']) ? sanitize_text_field($_POST['storage']) : '',
+            'comparison_status' => isset($_POST['comparison_status']) ? sanitize_text_field($_POST['comparison_status']) : '',
+            'per_page' => isset($_POST['per_page']) ? intval($_POST['per_page']) : 10,
+            'page' => isset($_POST['page']) ? intval($_POST['page']) : 1,
+            'order_by' => isset($_POST['order_by']) ? sanitize_text_field($_POST['order_by']) : 'id',
+            'order' => isset($_POST['order']) ? sanitize_text_field($_POST['order']) : 'ASC'
+        );
+
+        $response = $this->db->get_products($params);
+        wp_send_json_success($response);
+    }
+
+    /**
+     * Refresh WooCommerce data in the database
+     */
+    public function refresh_wc_data() {
+        check_ajax_referer('pohoda_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized');
+            return;
+        }
+
+        $result = $this->db->refresh_woocommerce_data();
+        wp_send_json_success($result);
+    }
+
+    /**
+     * Sync a database product with WooCommerce
+     */
+    public function sync_db_product() {
+        check_ajax_referer('pohoda_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized');
+            return;
+        }
+
+        $product_id = isset($_POST['product_id']) ? intval($_POST['product_id']) : 0;
+        
+        if (empty($product_id)) {
+            wp_send_json_error('Product ID is required');
+            return;
+        }
+        
+        $result = $this->db->sync_product_to_woocommerce($product_id);
+        
+        if ($result['success']) {
+            wp_send_json_success($result);
+        } else {
+            wp_send_json_error($result['message']);
+        }
+    }
+
     public function enqueue_admin_scripts($hook) {
         if ('toplevel_page_pohoda-settings' !== $hook) {
             return;
@@ -588,6 +849,7 @@ class Pohoda_Admin {
 
         wp_enqueue_style('pohoda-admin', plugin_dir_url(__FILE__) . 'css/pohoda-admin.css', array(), '1.0.0');
         wp_enqueue_script('pohoda-admin', plugin_dir_url(__FILE__) . 'assets/js/admin.js', array('jquery'), '1.0.0', true);
+        wp_enqueue_script('pohoda-db-products', plugin_dir_url(__FILE__) . 'assets/js/db-products.js', array('jquery'), '1.0.0', true);
         wp_localize_script('pohoda-admin', 'pohodaAdmin', array(
             'ajaxurl' => admin_url('admin-ajax.php'),
             'nonce' => wp_create_nonce('pohoda_nonce'),

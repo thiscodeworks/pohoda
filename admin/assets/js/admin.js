@@ -294,6 +294,8 @@ jQuery(document).ready(function($) {
                             table += '<th>Stock</th>';
                             table += '<th>Price</th>';
                             table += '<th>WooCommerce</th>';
+                            table += '<th>Actions</th>';
+                            table += '<th>Details</th>';
                             table += '</tr></thead><tbody>';
                             
                             products.forEach(function(product) {
@@ -355,6 +357,49 @@ jQuery(document).ready(function($) {
                                     (product.woocommerce_price !== undefined && product.woocommerce_price !== '' ? 
                                     ' <span class="wc-data">(WC: ' + product.woocommerce_price + ')</span>' : '') + '</td>';
                                 table += '<td>' + wooDetails + '</td>';
+                                
+                                // Add new column with sync button (only for products that exist in WooCommerce)
+                                var syncButton = '';
+                                if (product.woocommerce_exists) {
+                                    syncButton = '<button class="button button-primary sync-product" data-product-id="' + (product.id || '') + 
+                                        '" data-product-code="' + (product.code || '') + 
+                                        '" data-product-stock="' + (product.count || 0) + 
+                                        '" data-product-price="' + (product.selling_price || 0) + 
+                                        '" data-product-vat="' + (product.vat_rate || 21) + '">Sync</button>';
+                                    
+                                    // Add eye icon button to view product in WooCommerce
+                                    if (product.woocommerce_url) {
+                                        syncButton += ' <a href="' + product.woocommerce_url + '" target="_blank" class="button button-secondary" title="View in WooCommerce"><span class="dashicons dashicons-visibility" style="margin-top: 2px;"></span></a>';
+                                    }
+                                } else {
+                                    syncButton = '-';
+                                }
+                                table += '<td>' + syncButton + '</td>';
+                                
+                                // Add new column for related files and details button
+                                var detailsButton = '';
+                                var hasDetails = (product.related_files && product.related_files.length > 0) || 
+                                               (product.pictures && product.pictures.length > 0) || 
+                                               (product.categories && product.categories.length > 0) ||
+                                               (product.related_stocks && product.related_stocks.length > 0) ||
+                                               (product.alternative_stocks && product.alternative_stocks.length > 0);
+                                
+                                if (hasDetails) {
+                                    detailsButton = '<button class="button show-product-details" data-product-id="' + (product.id || '') + '">Details</button>';
+                                    
+                                    // Store details in data attribute to retrieve later
+                                    detailsButton += '<div class="hidden product-details-data" ' +
+                                        'data-files=\'' + JSON.stringify(product.related_files || []) + '\' ' +
+                                        'data-pictures=\'' + JSON.stringify(product.pictures || []) + '\' ' +
+                                        'data-categories=\'' + JSON.stringify(product.categories || []) + '\' ' +
+                                        'data-related=\'' + JSON.stringify(product.related_stocks || []) + '\' ' +
+                                        'data-alternatives=\'' + JSON.stringify(product.alternative_stocks || []) + '\' ' +
+                                        'data-product-name=\'' + (product.name || '') + '\'></div>';
+                                } else {
+                                    detailsButton = '-';
+                                }
+                                table += '<td>' + detailsButton + '</td>';
+                                
                                 table += '</tr>';
                             });
                             
@@ -367,10 +412,10 @@ jQuery(document).ready(function($) {
                             
                             // Add some CSS for the WooCommerce status
                             $('<style>')
-                                .text('.pohoda-row-match { background-color: #d4edda; } ' +
-                                      '.pohoda-row-mismatch { background-color: #fff3cd; } ' +
-                                      '.pohoda-row-missing { background-color: #f8d7da; } ' +
-                                      '.pohoda-row-unknown { background-color: #d6d8d9; } ' +
+                                .text('.pohoda-row-match { background-color: #d4edda !important; } ' +
+                                      '.pohoda-row-mismatch { background-color: #fff3cd !important; } ' +
+                                      '.pohoda-row-missing { background-color: #f8d7da !important; } ' +
+                                      '.pohoda-row-unknown { background-color: #d6d8d9 !important; } ' +
                                       '.woo-exists { color: #1e7e34; font-weight: bold; margin-right: 10px; } ' +
                                       '.woo-missing { color: #dc3545; font-weight: bold; margin-right: 10px; } ' +
                                       '.woo-mismatch { color: #856404; font-weight: bold; margin-right: 10px; } ' +
@@ -380,9 +425,226 @@ jQuery(document).ready(function($) {
                                       '.mismatch-item { margin-bottom: 2px; }')
                                 .appendTo('head');
                                 
-                            // Add alternating row colors that preserve the status colors
-                            $('.wp-list-table tr:nth-child(even):not(.pohoda-row-match):not(.pohoda-row-mismatch):not(.pohoda-row-missing):not(.pohoda-row-unknown)').css('background-color', '#f9f9f9');
-                            $('.wp-list-table tr:nth-child(odd):not(.pohoda-row-match):not(.pohoda-row-mismatch):not(.pohoda-row-missing):not(.pohoda-row-unknown)').css('background-color', '#ffffff');
+                            // Override WordPress alternating row colors
+                            $('<style>')
+                                .text('.wp-list-table.striped tbody tr.alternate, .wp-list-table.striped>tbody>:nth-child(odd) { background-color: transparent; }')
+                                .appendTo('head');
+                                
+                            // Add modal HTML for product details if not already present
+                            if ($('#product-details-modal').length === 0) {
+                                $('body').append(`
+                                    <div id="product-details-modal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); z-index:999999;">
+                                        <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); background:white; padding:20px; border-radius:5px; width:80%; max-width:800px; max-height:80vh; overflow-y:auto;">
+                                            <h2 id="modal-product-name"></h2>
+                                            <div class="modal-tabs">
+                                                <button class="modal-tab active" data-tab="files">Files</button>
+                                                <button class="modal-tab" data-tab="pictures">Pictures</button>
+                                                <button class="modal-tab" data-tab="categories">Categories</button>
+                                                <button class="modal-tab" data-tab="related">Related Products</button>
+                                                <button class="modal-tab" data-tab="alternatives">Alternative Products</button>
+                                            </div>
+                                            <div class="modal-content">
+                                                <div id="tab-files" class="tab-content active"></div>
+                                                <div id="tab-pictures" class="tab-content"></div>
+                                                <div id="tab-categories" class="tab-content"></div>
+                                                <div id="tab-related" class="tab-content"></div>
+                                                <div id="tab-alternatives" class="tab-content"></div>
+                                            </div>
+                                            <button id="close-details-modal" class="button button-primary" style="margin-top:20px;">Close</button>
+                                        </div>
+                                    </div>
+                                `);
+                                
+                                // Add styles for modal
+                                $('<style>')
+                                    .text(`
+                                        .modal-tabs { margin-bottom: 15px; border-bottom: 1px solid #ccc; }
+                                        .modal-tab { border: none; background: none; padding: 8px 15px; cursor: pointer; margin-right: 5px; }
+                                        .modal-tab.active { font-weight: bold; border-bottom: 2px solid #2271b1; }
+                                        .tab-content { display: none; }
+                                        .tab-content.active { display: block; }
+                                        .file-item, .picture-item, .category-item, .related-item, .alternative-item { 
+                                            margin-bottom: 10px; 
+                                            padding: 10px; 
+                                            background: #f9f9f9; 
+                                            border: 1px solid #eee; 
+                                        }
+                                        .hidden { display: none; }
+                                    `)
+                                    .appendTo('head');
+                                
+                                // Close modal
+                                $(document).on('click', '#close-details-modal', function() {
+                                    $('#product-details-modal').hide();
+                                });
+                                
+                                // Tab switching
+                                $(document).on('click', '.modal-tab', function() {
+                                    $('.modal-tab').removeClass('active');
+                                    $(this).addClass('active');
+                                    
+                                    var tab = $(this).data('tab');
+                                    $('.tab-content').removeClass('active');
+                                    $('#tab-' + tab).addClass('active');
+                                });
+                            }
+                            
+                            // Handle details button click
+                            $(document).on('click', '.show-product-details', function() {
+                                var $data = $(this).siblings('.product-details-data');
+                                var files = JSON.parse($data.attr('data-files') || '[]');
+                                var pictures = JSON.parse($data.attr('data-pictures') || '[]');
+                                var categories = JSON.parse($data.attr('data-categories') || '[]');
+                                var related = JSON.parse($data.attr('data-related') || '[]');
+                                var alternatives = JSON.parse($data.attr('data-alternatives') || '[]');
+                                var productName = $data.attr('data-product-name');
+                                
+                                $('#modal-product-name').text(productName);
+                                
+                                // Populate files tab
+                                var filesHtml = '';
+                                if (files.length > 0) {
+                                    files.forEach(function(file) {
+                                        filesHtml += '<div class="file-item">';
+                                        filesHtml += '<div><strong>Filename:</strong> ' + file.filepath + '</div>';
+                                        if (file.description) {
+                                            filesHtml += '<div><strong>Description:</strong> ' + file.description + '</div>';
+                                        }
+                                        filesHtml += '</div>';
+                                    });
+                                } else {
+                                    filesHtml = '<p>No related files found.</p>';
+                                }
+                                $('#tab-files').html(filesHtml);
+                                
+                                // Populate pictures tab
+                                var picturesHtml = '';
+                                if (pictures.length > 0) {
+                                    pictures.forEach(function(picture) {
+                                        picturesHtml += '<div class="picture-item">';
+                                        picturesHtml += '<div><strong>Filename:</strong> ' + picture.filepath + '</div>';
+                                        if (picture.description) {
+                                            picturesHtml += '<div><strong>Description:</strong> ' + picture.description + '</div>';
+                                        }
+                                        if (picture.default) {
+                                            picturesHtml += '<div><strong>Default picture</strong></div>';
+                                        }
+                                        picturesHtml += '</div>';
+                                    });
+                                } else {
+                                    picturesHtml = '<p>No pictures found.</p>';
+                                }
+                                $('#tab-pictures').html(picturesHtml);
+                                
+                                // Populate categories tab
+                                var categoriesHtml = '';
+                                if (categories.length > 0) {
+                                    categoriesHtml = '<ul>';
+                                    categories.forEach(function(category) {
+                                        categoriesHtml += '<li>Category ID: ' + category + '</li>';
+                                    });
+                                    categoriesHtml += '</ul>';
+                                } else {
+                                    categoriesHtml = '<p>No categories found.</p>';
+                                }
+                                $('#tab-categories').html(categoriesHtml);
+                                
+                                // Populate related products tab
+                                var relatedHtml = '';
+                                if (related.length > 0) {
+                                    relatedHtml = '<ul>';
+                                    related.forEach(function(stockId) {
+                                        relatedHtml += '<li>Related Stock ID: ' + stockId + '</li>';
+                                    });
+                                    relatedHtml += '</ul>';
+                                } else {
+                                    relatedHtml = '<p>No related products found.</p>';
+                                }
+                                $('#tab-related').html(relatedHtml);
+                                
+                                // Populate alternative products tab
+                                var alternativesHtml = '';
+                                if (alternatives.length > 0) {
+                                    alternativesHtml = '<ul>';
+                                    alternatives.forEach(function(stockId) {
+                                        alternativesHtml += '<li>Alternative Stock ID: ' + stockId + '</li>';
+                                    });
+                                    alternativesHtml += '</ul>';
+                                } else {
+                                    alternativesHtml = '<p>No alternative products found.</p>';
+                                }
+                                $('#tab-alternatives').html(alternativesHtml);
+                                
+                                // Show the first tab
+                                $('.modal-tab').removeClass('active');
+                                $('.modal-tab[data-tab="files"]').addClass('active');
+                                $('.tab-content').removeClass('active');
+                                $('#tab-files').addClass('active');
+                                
+                                // Display modal
+                                $('#product-details-modal').show();
+                            });
+
+                            // Handle sync button clicks
+                            $('.sync-product').on('click', function(e) {
+                                e.preventDefault();
+                                var $button = $(this);
+                                var productId = $button.data('product-id');
+                                var productCode = $button.data('product-code');
+                                var productStock = $button.data('product-stock');
+                                var productPrice = $button.data('product-price');
+                                var productVat = $button.data('product-vat');
+                                
+                                $button.prop('disabled', true).text('Syncing...');
+                                
+                                $.ajax({
+                                    url: pohodaAdmin.ajaxurl,
+                                    type: 'POST',
+                                    data: {
+                                        action: 'sync_pohoda_product',
+                                        nonce: pohodaAdmin.nonce,
+                                        product_id: productId,
+                                        product_code: productCode,
+                                        product_stock: productStock,
+                                        product_price: productPrice,
+                                        product_vat: productVat
+                                    },
+                                    success: function(response) {
+                                        if (response.success) {
+                                            $button.closest('tr').removeClass('pohoda-row-mismatch pohoda-row-unknown')
+                                                .addClass('pohoda-row-match');
+                                            $button.closest('tr').find('.woo-mismatch, .woo-unknown').removeClass('woo-mismatch woo-unknown')
+                                                .addClass('woo-exists').text('Synced');
+                                            $button.closest('tr').find('.mismatch-details').remove();
+                                            
+                                            // Update the displayed values
+                                            if (response.data.stock !== undefined) {
+                                                $button.closest('tr').find('td:nth-child(4)').html(
+                                                    response.data.stock + ' <span class="wc-data">(WC: ' + response.data.stock + ')</span>'
+                                                );
+                                            }
+                                            
+                                            if (response.data.price !== undefined) {
+                                                $button.closest('tr').find('td:nth-child(5)').html(
+                                                    product.selling_price + ' <span class="wc-data">(WC: ' + response.data.price + ' with ' + response.data.vat_rate + '% VAT)</span>'
+                                                );
+                                            }
+                                            
+                                            $button.prop('disabled', false).text('Synced!');
+                                            setTimeout(function() {
+                                                $button.text('Sync');
+                                            }, 3000);
+                                        } else {
+                                            alert('Error syncing product: ' + response.data);
+                                            $button.prop('disabled', false).text('Retry Sync');
+                                        }
+                                    },
+                                    error: function() {
+                                        alert('Failed to sync product. Please try again.');
+                                        $button.prop('disabled', false).text('Retry Sync');
+                                    }
+                                });
+                            });
                         }
                     } else {
                         // The API returned an error
