@@ -982,18 +982,27 @@ class Pohoda_Admin {
                 if (isset($result['success']) && $result['success']) {
                     wp_send_json_success($result); // Send the full result which might include counts etc.
                 } else {
-                    wp_send_json_error(isset($result['data']) ? $result['data'] : ['message' => 'Failed during download_first_products step'], 500);
+                    $error_message = isset($result['message']) ? $result['message'] : 'Failed during download_first_products step.';
+                    $error_data = isset($result['data']) ? $result['data'] : []; // Store original data if any
+                    if (isset($result['errors']) && is_array($result['errors'])) {
+                        $error_message .= ' Details: ' . implode(', ', $result['errors']);
+                    }
+                    pohoda_debug_log("Pohoda_Admin: download_first_products error - Message: {$error_message} - Full Result: " . print_r($result, true));
+                    wp_send_json_error(['message' => $error_message, 'original_data' => $error_data, 'full_response' => $result], 500);
                 }
                 break;
             case 'sync_rest_products':
-                // Placeholder: This will also use _handle_sync_db_products_logic but needs to manage pagination/offset
-                // For now, let's just call it once like the first step to ensure it works.
-                // We'll need to pass state (next start_id) between JS and PHP for true pagination here.
                 $result = $this->_handle_sync_db_products_logic(100, 0); // Example, assuming next batch after first
                 if (isset($result['success']) && $result['success']) {
                      wp_send_json_success(['message' => 'Krok sync_rest_products zavolán (s testovací dávkou).', 'data' => $result]);
                 } else {
-                     wp_send_json_error(isset($result['data']) ? $result['data'] : ['message' => 'Failed during sync_rest_products step'], 500);
+                    $error_message = isset($result['message']) ? $result['message'] : 'Failed during sync_rest_products step.';
+                    $error_data = isset($result['data']) ? $result['data'] : [];
+                    if (isset($result['errors']) && is_array($result['errors'])) {
+                        $error_message .= ' Details: ' . implode(', ', $result['errors']);
+                    }
+                    pohoda_debug_log("Pohoda_Admin: sync_rest_products error - Message: {$error_message} - Full Result: " . print_r($result, true));
+                    wp_send_json_error(['message' => $error_message, 'original_data' => $error_data, 'full_response' => $result], 500);
                 }
                 break;
             case 'update_pohoda_db':

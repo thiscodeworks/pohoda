@@ -461,7 +461,16 @@ class Pohoda_Product_Service {
             $results['errors'][] = 'Exception during product sync: ' . $e->getMessage();
             $results['has_more'] = false; // Stop if general exception occurs
             pohoda_debug_log("Pohoda_Product_Service: Exception in sync_products_to_db: " . $e->getMessage());
+            // Ensure success is false if an exception is caught here before returning
+            $results['success'] = false;
         }
+
+        // If we've reached here without returning early due to a major error (like API fetch failure),
+        // consider the operation broadly successful, even if some individual items had errors (logged in $results['errors'])
+        if (!isset($results['success'])) { // Only set if not already set to false by an exception or API failure
+            $results['success'] = true;
+        }
+
         pohoda_debug_log("Pohoda_Product_Service: sync_products_to_db finished. Results: " . print_r($results, true));
         return $results;
     }
