@@ -383,14 +383,14 @@ class Pohoda_Product_Service {
             }
 
             foreach ($products as $product) {
-                $exists = $this->wpdb->get_var($this->wpdb->prepare("SELECT id FROM $table_name WHERE id = %d", $product['id']));
+                pohoda_debug_log("Pohoda_Product_Service: Processing product for DB sync. API ID: {$product['id']}, Code: {$product['code']}");
                 $db_data = [
                     'id' => $product['id'], 'code' => $product['code'], 'name' => $product['name'],
                     'unit' => $product['unit'], 'type' => $product['type'], 'storage' => $product['storage'],
                     'count' => $product['count'], 'purchasing_price' => $product['purchasing_price'],
                     'selling_price' => $product['selling_price'], 'vat_rate' => $product['vat_rate'],
                     'related_files' => !empty($product['related_files']) ? json_encode($product['related_files']) : null,
-                    'pictures' => !empty($product['pictures']) ? json_encode($product['pictures']) : null, // Store raw picture data from API
+                    'pictures' => !empty($product['pictures']) ? json_encode($product['pictures']) : null,
                     'categories' => !empty($product['categories']) ? json_encode($product['categories']) : null,
                     'related_stocks' => !empty($product['related_stocks']) ? json_encode($product['related_stocks']) : null,
                     'alternative_stocks' => !empty($product['alternative_stocks']) ? json_encode($product['alternative_stocks']) : null,
@@ -405,12 +405,44 @@ class Pohoda_Product_Service {
                 ];
                 $format = ['%d', '%s', '%s', '%s', '%s', '%s', '%f', '%f', '%f', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%s', '%s', '%s', '%s'];
 
-                if ($exists) {
-                    if($this->wpdb->update($table_name, $db_data, ['id' => $product['id']], $format, ['%d']) !== false) $results['total_updated']++;
-                    else $results['errors'][] = "Failed to update product ID {$product['id']}: " . $this->wpdb->last_error;
+                // Try to find existing product by Pohoda ID first
+                $existing_by_id = $this->wpdb->get_row($this->wpdb->prepare("SELECT * FROM $table_name WHERE id = %d", $product['id']));
+
+                if ($existing_by_id) {
+                    pohoda_debug_log("Pohoda_Product_Service: Product found by API ID {$product['id']}. Updating.");
+                    if($this->wpdb->update($table_name, $db_data, ['id' => $product['id']], $format, ['%d']) !== false) {
+                        $results['total_updated']++;
+                    } else {
+                        $results['errors'][] = "Failed to update product by ID {$product['id']}: " . $this->wpdb->last_error;
+                        pohoda_debug_log("Pohoda_Product_Service: DB UPDATE by ID FAILED for API ID {$product['id']}. Error: " . $this->wpdb->last_error);
+                    }
                 } else {
-                    if($this->wpdb->insert($table_name, $db_data, $format) !== false) $results['total_inserted']++;
-                    else $results['errors'][] = "Failed to insert product ID {$product['id']}: " . $this->wpdb->last_error;
+                    // If not found by ID, check if a product with the same CODE exists
+                    pohoda_debug_log("Pohoda_Product_Service: Product with API ID {$product['id']} not found. Checking by code: {$product['code']}.");
+                    $existing_by_code = $this->wpdb->get_row($this->wpdb->prepare("SELECT * FROM $table_name WHERE code = %s", $product['code']));
+                    
+                    if ($existing_by_code) {
+                        // Product with this code exists, but with a different Pohoda ID. Update this record.
+                        // This assumes the API data (including the new Pohoda ID) is the source of truth for this code.
+                        pohoda_debug_log("Pohoda_Product_Service: Product found by CODE {$product['code']} (API ID {$product['id']}, DB ID {$existing_by_code->id}). Updating this record with new API ID and data.");
+                        // We need to update the where clause to target the existing row by its current ID or code.
+                        // And the $db_data already contains the new $product['id'] from the API.
+                        if($this->wpdb->update($table_name, $db_data, ['id' => $existing_by_code->id], $format, ['%d']) !== false) {
+                            $results['total_updated']++;
+                        } else {
+                            $results['errors'][] = "Failed to update product by CODE {$product['code']} (old ID {$existing_by_code->id} to new ID {$product['id']}): " . $this->wpdb->last_error;
+                            pohoda_debug_log("Pohoda_Product_Service: DB UPDATE by CODE FAILED for code {$product['code']}. Error: " . $this->wpdb->last_error);
+                        }
+                    } else {
+                        // Product not found by ID or Code, so it's a new insert
+                        pohoda_debug_log("Pohoda_Product_Service: Product not found by ID or code. Inserting new product API ID {$product['id']}, Code {$product['code']}.");
+                        if($this->wpdb->insert($table_name, $db_data, $format) !== false) {
+                            $results['total_inserted']++;
+                        } else {
+                            $results['errors'][] = "Failed to insert product ID {$product['id']} (Code {$product['code']}): " . $this->wpdb->last_error;
+                            pohoda_debug_log("Pohoda_Product_Service: DB INSERT FAILED for API ID {$product['id']}. Error: " . $this->wpdb->last_error);
+                        }
+                    }
                 }
 
                 if (!empty($product['pictures'])) {

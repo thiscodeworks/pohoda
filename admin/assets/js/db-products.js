@@ -1305,9 +1305,7 @@ jQuery(document).ready(function($) {
 
     // Handle create all missing products button
     $('#create-all-missing').on('click', function() {
-        if (!confirm('This will create WooCommerce products for all missing items. Continue?')) {
-            return;
-        }
+        console.log('Pohoda DB JS: Create All Missing button clicked, proceeding (confirmation skipped).');
         
         var $button = $(this);
         var $progress = $('#sync-progress');
