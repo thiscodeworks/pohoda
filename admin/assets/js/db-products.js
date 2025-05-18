@@ -1476,6 +1476,171 @@ jQuery(document).ready(function($) {
         });
     });
 
+    // After the sync-all-products button
+    $('#sync-all-products').after(' <button id="check-db-status" class="button">Check DB Status</button>');
+
+    // Handle check DB status button
+    $('#check-db-status').on('click', function() {
+        var $button = $(this);
+        $button.prop('disabled', true).text('Checking...');
+        
+        $.ajax({
+            url: pohodaAdmin.ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'check_db_status',
+                nonce: pohodaAdmin.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    var debugInfo = response.data;
+                    
+                    // Create modal dialog to display the info
+                    var $dialog = $('<div id="db-status-dialog" title="Database Status"></div>');
+                    var html = '<div style="max-height: 500px; overflow-y: auto;">';
+                    
+                    // Products table
+                    html += '<h3>Products Table</h3>';
+                    html += '<p>Name: ' + debugInfo.products_table.name + '</p>';
+                    html += '<p>Exists: ' + (debugInfo.products_table.exists ? 'Yes' : 'No') + '</p>';
+                    
+                    if (debugInfo.products_table.exists) {
+                        html += '<p>Count: ' + debugInfo.products_table.count + ' products</p>';
+                        html += '<p>Columns: ' + debugInfo.products_table.columns.join(', ') + '</p>';
+                    }
+                    
+                    // Images table
+                    html += '<h3>Images Table</h3>';
+                    html += '<p>Name: ' + debugInfo.images_table.name + '</p>';
+                    html += '<p>Exists: ' + (debugInfo.images_table.exists ? 'Yes' : 'No') + '</p>';
+                    
+                    if (debugInfo.images_table.exists) {
+                        html += '<p>Count: ' + debugInfo.images_table.count + ' images</p>';
+                        html += '<p>Products with images: ' + debugInfo.images_table.products_with_images + '</p>';
+                        html += '<p>Columns: ' + debugInfo.images_table.columns.join(', ') + '</p>';
+                        
+                        // Status counts
+                        html += '<h4>Image Sync Status</h4>';
+                        html += '<ul>';
+                        for (var status in debugInfo.images_table.status_counts) {
+                            html += '<li>' + status + ': ' + debugInfo.images_table.status_counts[status] + '</li>';
+                        }
+                        html += '</ul>';
+                    }
+                    
+                    // Create table result
+                    html += '<h3>Create Images Table Result</h3>';
+                    html += '<p>' + (debugInfo.create_images_table_result ? 'Table was created' : 'Table already exists') + '</p>';
+                    
+                    html += '<h3>Raw Data</h3>';
+                    html += '<pre style="max-height: 200px; overflow: auto; background: #f5f5f5; padding: 10px; font-size: 12px;">' + 
+                             JSON.stringify(debugInfo, null, 2) + '</pre>';
+                    
+                    html += '</div>';
+                    
+                    $dialog.html(html);
+                    
+                    // Create and open dialog
+                    $('body').append($dialog);
+                    $dialog.dialog({
+                        modal: true,
+                        width: 600,
+                        height: 600,
+                        buttons: {
+                            Close: function() {
+                                $(this).dialog('close');
+                            }
+                        },
+                        close: function() {
+                            $(this).remove();
+                        }
+                    });
+                } else {
+                    alert('Error checking DB status: ' + (response.data || 'Unknown error'));
+                }
+            },
+            error: function(xhr, status, error) {
+                alert('Ajax Error: ' + error);
+            },
+            complete: function() {
+                $button.prop('disabled', false).text('Check DB Status');
+            }
+        });
+    });
+
+    // After the check DB status button
+    $('#check-db-status').after(' <button id="force-create-tables" class="button button-warning">Force Create Tables</button>');
+
+    // Handle force create tables button
+    $('#force-create-tables').on('click', function() {
+        if (!confirm('This will force create database tables. Continue?')) {
+            return;
+        }
+        
+        var $button = $(this);
+        $button.prop('disabled', true).text('Creating...');
+        
+        $.ajax({
+            url: pohodaAdmin.ajaxurl,
+            type: 'POST',
+            data: {
+                action: 'force_create_tables',
+                nonce: pohodaAdmin.nonce
+            },
+            success: function(response) {
+                if (response.success) {
+                    var result = response.data;
+                    
+                    // Create modal dialog to display the info
+                    var $dialog = $('<div id="force-create-tables-dialog" title="Force Create Tables Result"></div>');
+                    var html = '<div style="max-height: 500px; overflow-y: auto;">';
+                    
+                    // Results
+                    html += '<h3>Products Table</h3>';
+                    html += '<p>Created: ' + (result.products_table ? 'Yes' : 'No (table already exists)') + '</p>';
+                    
+                    html += '<h3>Images Table</h3>';
+                    html += '<p>Created: ' + (result.images_table ? 'Yes' : 'No (table already exists)') + '</p>';
+                    
+                    // Status
+                    html += '<h3>Current Status</h3>';
+                    html += '<pre style="max-height: 200px; overflow: auto; background: #f5f5f5; padding: 10px; font-size: 12px;">' + 
+                             JSON.stringify(result.status, null, 2) + '</pre>';
+                    
+                    html += '</div>';
+                    
+                    $dialog.html(html);
+                    
+                    // Create and open dialog
+                    $('body').append($dialog);
+                    $dialog.dialog({
+                        modal: true,
+                        width: 600,
+                        height: 600,
+                        buttons: {
+                            Close: function() {
+                                $(this).dialog('close');
+                            }
+                        },
+                        close: function() {
+                            $(this).remove();
+                        }
+                    });
+                    
+                    alert('Database tables created or updated!');
+                } else {
+                    alert('Error creating tables: ' + (response.data || 'Unknown error'));
+                }
+            },
+            error: function(xhr, status, error) {
+                alert('Ajax Error: ' + error);
+            },
+            complete: function() {
+                $button.prop('disabled', false).text('Force Create Tables');
+            }
+        });
+    });
+
     // Make loadDbProducts available globally
     window.loadDbProducts = loadDbProducts;
 }); 

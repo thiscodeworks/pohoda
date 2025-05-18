@@ -850,9 +850,15 @@ jQuery(document).ready(function($) {
 
     // Handle sync all products button
     $('#sync-all-products').on('click', function() {
-        if (!confirm('This will sync all products from Pohoda to the local database. Continue?')) {
-            return;
-        }
+        // console.log('Pohoda Admin JS: Sync All Products button clicked, attempting to show confirm dialog.');
+        // var userConfirmed = confirm('This will sync all products from Pohoda to the local database. Continue?');
+        // console.log('Pohoda Admin JS: User confirmation result: ' + userConfirmed);
+
+        // if (!userConfirmed) {
+        //     console.log('Pohoda Admin JS: User cancelled sync or confirm dialog was blocked.');
+        //     return;
+        // }
+        console.log('Pohoda Admin JS: Sync All Products button clicked, proceeding with sync AJAX call (confirmation skipped).');
         
         var $button = $(this);
         var $progress = $('#sync-progress');
@@ -980,9 +986,12 @@ jQuery(document).ready(function($) {
 
     // Handle sync all mismatched products button
     $('#sync-all-mismatched').on('click', function() {
-        if (!confirm('This will sync all mismatched products from database to WooCommerce. Continue?')) {
-            return;
-        }
+        // console.log('Pohoda Admin JS: Sync All Mismatched Products button clicked, attempting to show confirm dialog.');
+        // if (!confirm('This will sync all mismatched products from database to WooCommerce. Continue?')) {
+        //     console.log('Pohoda Admin JS: User cancelled sync for mismatched products or confirm dialog was blocked.');
+        //     return;
+        // }
+        console.log('Pohoda Admin JS: Sync All Mismatched Products button clicked, proceeding with sync (confirmation skipped).');
         
         var $button = $(this);
         var $progress = $('#sync-progress');

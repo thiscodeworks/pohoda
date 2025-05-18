@@ -1143,22 +1143,23 @@ class Pohoda_Admin {
 
     // Register AJAX endpoints for the plugin
     public function register_ajax_endpoints() {
-        add_action('wp_ajax_test_pohoda_connection', array($this, 'test_connection'));
+        add_action('wp_ajax_test_connection', array($this, 'test_connection'));
         add_action('wp_ajax_load_stores', array($this, 'load_stores'));
-        add_action('wp_ajax_load_pohoda_orders', array($this, 'load_orders'));
-        add_action('wp_ajax_send_pohoda_xml', array($this, 'send_xml'));
-        add_action('wp_ajax_get_db_products', array($this, 'get_db_products'));
+        add_action('wp_ajax_load_orders', array($this, 'load_orders'));
+        add_action('wp_ajax_send_xml', array($this, 'send_xml'));
         add_action('wp_ajax_sync_db_products', array($this, 'sync_db_products'));
-        add_action('wp_ajax_get_wc_product_data', array($this, 'get_wc_product_data'));
+        add_action('wp_ajax_get_db_products', array($this, 'get_db_products'));
         add_action('wp_ajax_refresh_wc_data', array($this, 'refresh_wc_data'));
         add_action('wp_ajax_sync_db_product', array($this, 'sync_db_product'));
         add_action('wp_ajax_create_wc_product', array($this, 'create_wc_product'));
+        add_action('wp_ajax_create_all_missing_products', array($this, 'create_all_missing_products'));
         add_action('wp_ajax_get_all_mismatched_products', array($this, 'get_all_mismatched_products'));
         add_action('wp_ajax_get_all_missing_products', array($this, 'get_all_missing_products'));
-        add_action('wp_ajax_create_all_missing_products', array($this, 'create_all_missing_products'));
         add_action('wp_ajax_find_orphan_wc_products', array($this, 'find_orphan_wc_products'));
         add_action('wp_ajax_delete_orphan_wc_product', array($this, 'delete_orphan_wc_product'));
         add_action('wp_ajax_hide_orphan_wc_product', array($this, 'hide_orphan_wc_product'));
+        add_action('wp_ajax_check_db_status', array($this, 'check_db_status'));
+        add_action('wp_ajax_force_create_tables', array($this, 'force_create_tables'));
     }
 
     /**
@@ -1397,5 +1398,35 @@ class Pohoda_Admin {
         wp_send_json_success(array(
             'message' => 'Product hidden successfully'
         ));
+    }
+
+    /**
+     * Check database tables status
+     */
+    public function check_db_status() {
+        check_ajax_referer('pohoda_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized');
+            return;
+        }
+
+        $debug_info = $this->api->check_db_tables_status();
+        wp_send_json_success($debug_info);
+    }
+
+    /**
+     * Force create database tables
+     */
+    public function force_create_tables() {
+        check_ajax_referer('pohoda_nonce', 'nonce');
+
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized');
+            return;
+        }
+
+        $result = $this->api->force_create_tables();
+        wp_send_json_success($result);
     }
 } 
