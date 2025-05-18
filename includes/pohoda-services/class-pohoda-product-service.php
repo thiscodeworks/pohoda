@@ -572,4 +572,79 @@ class Pohoda_Product_Service {
         }
         return ['success' => true, 'updated' => $total_updated];
     }
+
+    public function update_local_product_wc_status_after_check($pohoda_db_row_pk_id, $wc_product_id_if_exists) {
+        $table_name = $this->wpdb->prefix . 'pohoda_products';
+        pohoda_debug_log("Pohoda_Product_Service: update_local_product_wc_status_after_check called for local DB PK ID: {$pohoda_db_row_pk_id}, WC Product ID (if exists): " . ($wc_product_id_if_exists ?? 'null'));
+
+        $product_in_db = $this->wpdb->get_row($this->wpdb->prepare("SELECT * FROM $table_name WHERE id = %d", $pohoda_db_row_pk_id), ARRAY_A);
+
+        if (!$product_in_db) {
+            pohoda_debug_log("Pohoda_Product_Service: update_local_product_wc_status_after_check - Product not found in local DB by PK ID: {$pohoda_db_row_pk_id}");
+            return ['success' => false, 'message' => "Product with local DB ID {$pohoda_db_row_pk_id} not found."];
+        }
+
+        $update_data = ['last_updated' => current_time('mysql')];
+        $wc_product_loaded = false;
+
+        if ($wc_product_id_if_exists && function_exists('wc_get_product')) {
+            $wc_product = wc_get_product($wc_product_id_if_exists);
+            if ($wc_product) {
+                $wc_product_loaded = true;
+                $update_data['woocommerce_exists'] = 1;
+                $update_data['woocommerce_id'] = $wc_product_id_if_exists;
+                $update_data['woocommerce_url'] = get_edit_post_link($wc_product_id_if_exists, '');
+                $wc_stock = $wc_product->get_stock_quantity();
+                $update_data['woocommerce_stock'] = $wc_stock !== null ? (string)$wc_stock : '';
+                
+                // Use regular_price for comparison, assuming Pohoda selling_price is also without VAT.
+                // Ensure this matches your pricing setup.
+                $wc_price = $wc_product->get_regular_price(); 
+                $update_data['woocommerce_price'] = $wc_price !== '' ? (string)$wc_price : '';
+
+                // Perform comparison for 'comparison_status'
+                $stock_match = abs(($wc_stock !== null ? (float)$wc_stock : 0) - (float)$product_in_db['count']) <= 0.001;
+                
+                // Compare Pohoda selling_price (typically without VAT) with WC regular_price (typically without VAT)
+                $price_match = abs(($wc_price !== '' ? (float)$wc_price : 0) - (float)$product_in_db['selling_price']) <= 0.01;
+
+                $update_data['comparison_status'] = ($stock_match && $price_match) ? 'match' : 'mismatch';
+                pohoda_debug_log("Pohoda_Product_Service: Updating local product PK ID {$pohoda_db_row_pk_id}. WC ID: {$wc_product_id_if_exists}. Stock match: {$stock_match}, Price match: {$price_match}. Status: {$update_data['comparison_status']}");
+            } else {
+                // WC product ID provided, but product couldn't be loaded (e.g., deleted after ID was fetched)
+                $update_data['woocommerce_exists'] = 1; // Still mark as existing because an ID was provided
+                $update_data['woocommerce_id'] = $wc_product_id_if_exists;
+                $update_data['comparison_status'] = 'unknown'; // Cannot compare details
+                pohoda_debug_log("Pohoda_Product_Service: Updating local product PK ID {$pohoda_db_row_pk_id}. WC ID: {$wc_product_id_if_exists} provided, but wc_get_product failed. Status: unknown.");
+            }
+        } else {
+            // No WC product ID provided, or wc_get_product doesn't exist; mark as missing in WooCommerce
+            $update_data['woocommerce_exists'] = 0;
+            $update_data['woocommerce_id'] = 0;
+            $update_data['woocommerce_url'] = '';
+            $update_data['woocommerce_stock'] = '';
+            $update_data['woocommerce_price'] = '';
+            $update_data['comparison_status'] = 'missing';
+            if ($wc_product_id_if_exists && !function_exists('wc_get_product')) {
+                 pohoda_debug_log("Pohoda_Product_Service: Updating local product PK ID {$pohoda_db_row_pk_id}. WC ID {$wc_product_id_if_exists} provided, but wc_get_product function missing. Status: missing.");
+            } else {
+                 pohoda_debug_log("Pohoda_Product_Service: Updating local product PK ID {$pohoda_db_row_pk_id}. No WC ID provided. Status: missing.");
+            }
+        }
+
+        if (empty($update_data)) {
+            pohoda_debug_log("Pohoda_Product_Service: No data to update for local product PK ID {$pohoda_db_row_pk_id}.");
+            return ['success' => true, 'message' => 'No data to update.', 'updated' => false, 'status' => $product_in_db['comparison_status'] ?? 'unknown'];
+        }
+        
+        $updated_rows = $this->wpdb->update($table_name, $update_data, ['id' => $pohoda_db_row_pk_id]);
+
+        if ($updated_rows === false) {
+            pohoda_debug_log("Pohoda_Product_Service: Failed to update local product PK ID {$pohoda_db_row_pk_id} WC status. DB Error: " . $this->wpdb->last_error);
+            return ['success' => false, 'message' => 'DB Error: ' . $this->wpdb->last_error, 'updated' => false];
+        }
+        
+        pohoda_debug_log("Pohoda_Product_Service: Successfully updated local product PK ID {$pohoda_db_row_pk_id}. Rows affected: {$updated_rows}. New status: {$update_data['comparison_status']}");
+        return ['success' => true, 'updated' => $updated_rows > 0, 'new_status' => $update_data['comparison_status']];
+    }
 } 

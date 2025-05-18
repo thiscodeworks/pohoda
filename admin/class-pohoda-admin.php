@@ -795,6 +795,14 @@ class Pohoda_Admin {
             if ($existing_product_id) {
                 $failed++;
                 $errors[] = "Product '{$product['name']}' (code: {$product['code']}): Already exists in WooCommerce";
+                // Update local DB to reflect that this product exists in WC
+                if (isset($this->api) && is_object($this->api) && isset($this->api->product_service) && is_object($this->api->product_service)) {
+                    $this->api->product_service->update_local_product_wc_status_after_check($product['id'], $existing_product_id);
+                } else {
+                    if (function_exists('pohoda_debug_log')) {
+                        pohoda_debug_log("Pohoda_Admin: Critical - product_service not available in create_all_missing_products (existing product).");
+                    }
+                }
                 continue;
             }
 
@@ -818,6 +826,14 @@ class Pohoda_Admin {
             
             if ($wc_product_id) {
                 $created++;
+                // Update local DB to reflect that this product now exists in WC
+                if (isset($this->api) && is_object($this->api) && isset($this->api->product_service) && is_object($this->api->product_service)) {
+                    $this->api->product_service->update_local_product_wc_status_after_check($product['id'], $wc_product_id);
+                } else {
+                    if (function_exists('pohoda_debug_log')) {
+                        pohoda_debug_log("Pohoda_Admin: Critical - product_service not available in create_all_missing_products (newly created product).");
+                    }
+                }
             } else {
                 $failed++;
                 $errors[] = "Product '{$product['name']}' (code: {$product['code']}): Failed to create";
