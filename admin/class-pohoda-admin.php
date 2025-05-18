@@ -39,20 +39,70 @@ class Pohoda_Admin {
 
     public function create_admin_page() {
         $this->options = get_option('pohoda_settings');
-        $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'settings';
+        // Determine the active tab, default to 'sync'
+        $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'sync';
         ?>
         <div class="wrap">
-            <h1>Pohoda Settings</h1>
+            <h1>Pohoda Sync</h1>
             <h2 class="nav-tab-wrapper">
+                <a href="?page=pohoda-settings&tab=sync" class="nav-tab <?php echo $active_tab == 'sync' ? 'nav-tab-active' : ''; ?>">Synchronizace</a>
+                <a href="?page=pohoda-settings&tab=history" class="nav-tab <?php echo $active_tab == 'history' ? 'nav-tab-active' : ''; ?>">Historie synchronizací</a>
                 <a href="?page=pohoda-settings&tab=settings" class="nav-tab <?php echo $active_tab == 'settings' ? 'nav-tab-active' : ''; ?>">Nastavení</a>
-                <a href="?page=pohoda-settings&tab=products" class="nav-tab <?php echo $active_tab == 'products' ? 'nav-tab-active' : ''; ?>">Produkty</a>
-                <a href="?page=pohoda-settings&tab=stores" class="nav-tab <?php echo $active_tab == 'stores' ? 'nav-tab-active' : ''; ?>">Sklady</a>
-                <a href="?page=pohoda-settings&tab=orders" class="nav-tab <?php echo $active_tab == 'orders' ? 'nav-tab-active' : ''; ?>">Objednávky</a>
-                <a href="?page=pohoda-settings&tab=pohyby" class="nav-tab <?php echo $active_tab == 'pohyby' ? 'nav-tab-active' : ''; ?>">Pohyby</a>
-                <a href="?page=pohoda-settings&tab=test" class="nav-tab <?php echo $active_tab == 'test' ? 'nav-tab-active' : ''; ?>">Test</a>
             </h2>
 
-            <?php if($active_tab == 'settings') { ?>
+            <?php if ($active_tab == 'sync') : ?>
+                <div id="sync-main-page">
+                    <h2>Spustit novou synchronizaci</h2>
+                    <p>Kliknutím na tlačítko níže spustíte kompletní proces synchronizace.</p>
+                    <button id="start-full-sync" class="button button-primary">Spustit synchronizaci</button>
+                    
+                    <div id="sync-wizard-progress" style="margin-top: 20px; display: none;">
+                        <h3>Průběh synchronizace:</h3>
+                        <ul id="sync-steps">
+                            <li data-step="check_settings">Kontrola nastavení...</li>
+                            <li data-step="download_first_products">Stahování úvodních produktů...</li>
+                            <li data-step="sync_rest_products">Synchronizace zbylých produktů...</li>
+                            <li data-step="update_pohoda_db">Aktualizace Pohoda databáze...</li>
+                            <li data-step="update_prices">Aktualizace cen...</li>
+                            <li data-step="update_stock">Aktualizace skladových zásob...</li>
+                            <li data-step="reupload_images">Nahrávání obrázků...</li>
+                            <li data-step="create_missing_products">Vytváření chybějících produktů...</li>
+                            <li data-step="check_no_price_products">Kontrola produktů bez ceny...</li>
+                            <li data-step="check_no_image_products">Kontrola produktů bez obrázků...</li>
+                            <li data-step="finished">Dokončeno</li>
+                        </ul>
+                        <div class="progress-bar-container" style="width: 100%; background-color: #f0f0f0; border-radius: 4px; margin-top:10px;">
+                            <div id="wizard-progress-bar-inner" class="progress-bar-inner" style="height: 20px; width: 0%; background-color: #0073aa; text-align: center; color: white; line-height:20px;">0%</div>
+                        </div>
+                    </div>
+                </div>
+            <?php elseif ($active_tab == 'history') : ?>
+                <div id="sync-history-page">
+                    <h2>Historie synchronizací</h2>
+                    <p>Zde bude tabulka s historií provedených synchronizací.</p>
+                    <table class="wp-list-table widefat fixed striped">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Datum spuštění</th>
+                                <th>Stav</th>
+                                <th>Počet akcí</th>
+                                <th>Akce</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sync-history-table-body">
+                            <!-- History rows will be loaded here by JavaScript -->
+                            <tr><td colspan="5">Načítání historie...</td></tr>
+                        </tbody>
+                    </table>
+                    <div id="sync-history-details" style="margin-top: 20px; display:none;">
+                        <h3>Detaily synchronizace č. <span id="history-details-sync-id"></span></h3>
+                        <ul id="history-details-action-list">
+                            <!-- Action details will be loaded here -->
+                        </ul>
+                    </div>
+                </div>
+            <?php elseif($active_tab == 'settings') : ?>
                 <form method="post" action="options.php">
                     <?php
                     settings_fields('pohoda_option_group');
@@ -64,302 +114,7 @@ class Pohoda_Admin {
                 <h2>Test Connection</h2>
                 <button id="test-connection" class="button button-primary">Test Connection</button>
                 <div id="connection-result" style="margin-top: 10px;"></div>
-            <?php } elseif($active_tab == 'products') { ?>
-                <div class="pohoda-tab-content" id="tab-products">
-                    
-                    <!-- Database product filters and controls -->
-                    <div class="pohoda-section">
-                        <h2>Products in Pohoda</h2>
-                        <div class="pohoda-flex-container">
-                            <div class="pohoda-filter-group">
-                                <input type="text" id="db-product-search" placeholder="Search by name or code" class="regular-text">
-                                <select id="db-product-type">
-                                    <option value="">All Types</option>
-                                    <option value="card">Card</option>
-                                    <option value="service">Service</option>
-                                    <option value="text">Text</option>
-                                    <option value="set">Set</option>
-                                    <option value="complex">Complex</option>
-                                </select>
-                                <select id="db-product-storage">
-                                    <option value="">All Storages</option>
-                                    <?php
-                                    $stores = get_option('pohoda_stores', array());
-                                    foreach ($stores as $store) {
-                                        echo '<option value="' . esc_attr($store['id']) . '">' . esc_html($store['name']) . '</option>';
-                                    }
-                                    ?>
-                                </select>
-                                <select id="db-comparison-status">
-                                    <option value="">All</option>
-                                    <option value="match">Matched</option>
-                                    <option value="mismatch">Mismatched</option>
-                                    <option value="missing">Missing in WC</option>
-                                </select>
-                            </div>
-                            
-                            <div class="pohoda-filter-group">
-                                <select id="db-products-per-page">
-                                    <option value="10">10 per page</option>
-                                    <option value="25">25 per page</option>
-                                    <option value="50">50 per page</option>
-                                    <option value="100">100 per page</option>
-                                    <option value="1000">All (Limits 1000)</option>
-                                </select>
-                                <button id="load-db-products" class="button button-primary">Load Products</button>
-                            </div>
-                        </div>
-                        
-                        <!-- Button section with styled buttons -->
-                        <div class="pohoda-button-section">
-                            <button id="sync-all-products" class="button">Sync All Products from Pohoda</button>
-                            <button id="refresh-wc-data" class="button">Refresh WooCommerce Data</button>
-                            <button id="sync-all-mismatched" class="button button-warning">Sync All Mismatched</button>
-                            <button id="create-all-missing" class="button button-primary">Create All Missing</button>
-                        </div>
-                        
-                        <!-- Pagination controls -->
-                        <div class="pohoda-pagination" style="display:none;">
-                            <button id="prev-page" class="button">&laquo; Previous</button>
-                            <span id="page-info">Page 1 of 1</span>
-                            <button id="next-page" class="button">Next &raquo;</button>
-                        </div>
-                        
-                        <!-- Progress bar for sync operations -->
-                        <div id="sync-progress" style="display:none;">
-                            <div class="progress-bar-container">
-                                <div class="progress-bar-inner"></div>
-                            </div>
-                            <div class="progress-text">Processed <span id="progress-current">0</span> of <span id="progress-total">0</span> products</div>
-                        </div>
-                        
-                        <!-- Results container -->
-                        <div id="products-result"></div>
-                    </div>
-                    
-                    <!-- Orphaned WooCommerce products section -->
-                    <div class="pohoda-section">
-                        <h2>WooCommerce Products Not In Pohoda</h2>
-                        <p>Find WooCommerce products that do not have corresponding entries in the Pohoda database.</p>
-                        
-                        <div class="pohoda-button-section">
-                            <button id="find-orphan-wc-products" class="button button-primary">Find WooCommerce Products Not In Pohoda</button>
-                        </div>
-                        
-                        <!-- Results container for orphaned products -->
-                        <div id="orphan-products-result"></div>
-                    </div>
-                </div>
-                <style>
-                    .pohoda-products-container {
-                        margin-top: 20px;
-                    }
-                    .pohoda-actions {
-                        display: flex;
-                        gap: 10px;
-                        margin-bottom: 20px;
-                    }
-                    .pohoda-filters {
-                        display: flex;
-                        flex-wrap: wrap;
-                        gap: 15px;
-                        margin-bottom: 20px;
-                        padding: 15px;
-                        background: #f8f9fa;
-                        border: 1px solid #ddd;
-                        border-radius: 4px;
-                    }
-                    .filter-group {
-                        display: flex;
-                        flex-direction: column;
-                        gap: 5px;
-                    }
-                    .filter-group label {
-                        font-weight: 600;
-                    }
-                    .filter-group input,
-                    .filter-group select {
-                        min-width: 200px;
-                    }
-                    .pohoda-pagination {
-                        display: flex;
-                        align-items: center;
-                        gap: 10px;
-                        justify-content: center;
-                    }
-                    #page-info {
-                        min-width: 100px;
-                        text-align: center;
-                    }
-                    .progress-bar {
-                        height: 20px;
-                        background-color: #f0f0f0;
-                        border-radius: 4px;
-                        margin-bottom: 10px;
-                        overflow: hidden;
-                    }
-                    .progress-bar-inner {
-                        height: 100%;
-                        background-color: #0073aa;
-                        transition: width 0.3s ease;
-                    }
-                    .progress-status {
-                        text-align: center;
-                        font-weight: bold;
-                    }
-                    /* Button styles */
-                    .view-woo-button, .edit-woo-button {
-                        padding: 4px !important;
-                        line-height: 1 !important;
-                        height: auto !important;
-                        min-height: 30px !important;
-                        vertical-align: middle !important;
-                    }
-                    .dashicons {
-                        line-height: 1.5 !important;
-                        width: 18px !important;
-                        height: 18px !important;
-                        font-size: 18px !important;
-                        vertical-align: middle !important;
-                    }
-                    .button-warning {
-                        background-color: #ffb900 !important;
-                        border-color: #d39700 !important;
-                        color: #000 !important;
-                    }
-                    .button-warning:hover, .button-warning:focus {
-                        background-color: #f7a600 !important;
-                        border-color: #c08600 !important;
-                    }
-                </style>
-            <?php } elseif($active_tab == 'stores') { ?>
-                <h2>Sklady</h2>
-                <div class="pohoda-controls">
-                    <button id="load-stores" class="button button-primary">Načíst sklady</button>
-                    <div id="store-count" class="pohoda-count"></div>
-                </div>
-                <div id="stores-table-container"></div>
-            <?php } elseif($active_tab == 'orders') { ?>
-                <h2>Orders</h2>
-                <button id="load-orders" class="button button-primary">Load Orders</button>
-                <div id="orders-result" style="margin-top: 10px;"></div>
-                <div id="orders-raw" style="margin-top: 10px; display: none;">
-                    <h3>Raw Response</h3>
-                    <pre style="background: #f0f0f0; padding: 10px; overflow: auto;"></pre>
-                </div>
-            <?php } elseif($active_tab == 'pohyby') { ?>
-                <h2>Pohyby</h2>
-                <div class="pohyby-form">
-                    <form id="pohyby-form">
-                        <table class="form-table">
-                            <tr>
-                                <th><label for="agenda">Agenda</label></th>
-                                <td>
-                                    <select name="agenda" id="agenda" required>
-                                        <option value="stock">Sklad</option>
-                                        <option value="order">Objednávka</option>
-                                        <option value="invoice">Faktura</option>
-                                    </select>
-                                </td>
-                            </tr>
-                            <tr>
-                                <th><label for="stockType">Typ zásoby</label></th>
-                                <td>
-                                    <select name="stockType" id="stockType">
-                                        <option value="material">Materiál</option>
-                                        <option value="product">Zboží</option>
-                                        <option value="service">Služba</option>
-                                    </select>
-                                </td>
-                            </tr>
-                            <tr>
-                                <th><label for="stockItem">Skladová položka</label></th>
-                                <td>
-                                    <input type="text" name="stockItem" id="stockItem" required>
-                                </td>
-                            </tr>
-                            <tr>
-                                <th><label for="unit">Měrná jednotka</label></th>
-                                <td>
-                                    <input type="text" name="unit" id="unit">
-                                </td>
-                            </tr>
-                            <tr>
-                                <th><label for="date">Datum pohybu</label></th>
-                                <td>
-                                    <input type="date" name="date" id="date" required>
-                                </td>
-                            </tr>
-                            <tr>
-                                <th><label for="movementType">Typ pohybu</label></th>
-                                <td>
-                                    <select name="movementType" id="movementType" required>
-                                        <option value="expense">Výdej</option>
-                                        <option value="receipt">Příjem</option>
-                                    </select>
-                                </td>
-                            </tr>
-                            <tr>
-                                <th><label for="quantity">Množství</label></th>
-                                <td>
-                                    <input type="number" name="quantity" id="quantity" step="0.01" required>
-                                </td>
-                            </tr>
-                            <tr>
-                                <th><label for="unitPrice">Jednotková cena</label></th>
-                                <td>
-                                    <input type="number" name="unitPrice" id="unitPrice" step="0.01">
-                                </td>
-                            </tr>
-                            <tr>
-                                <th><label for="price">Celkem</label></th>
-                                <td>
-                                    <input type="number" name="price" id="price" step="0.01">
-                                </td>
-                            </tr>
-                            <tr>
-                                <th><label for="number">Číslo dokladu</label></th>
-                                <td>
-                                    <input type="text" name="number" id="number" required>
-                                </td>
-                            </tr>
-                            <tr>
-                                <th><label for="regNumber">Evidenční číslo</label></th>
-                                <td>
-                                    <input type="text" name="regNumber" id="regNumber" maxlength="48" required>
-                                </td>
-                            </tr>
-                        </table>
-                        <p class="submit">
-                            <button type="submit" class="button button-primary">Odeslat</button>
-                        </p>
-                    </form>
-                    <div id="pohyby-response" style="margin-top: 20px;">
-                        <h3>Response</h3>
-                        <pre style="background: #f0f0f0; padding: 10px; overflow: auto; min-height: 200px;"></pre>
-                    </div>
-                </div>
-            <?php } elseif($active_tab == 'test') { ?>
-                <h2>Test XML Request</h2>
-                <div style="margin-bottom: 20px;">
-                    <textarea id="xml-request" style="width: 100%; height: 200px; font-family: monospace;"><?php echo htmlspecialchars('<?xml version="1.0" encoding="UTF-8"?>
-<dat:dataPack xmlns:dat="http://www.stormware.cz/schema/version_2/data.xsd" xmlns:stk="http://www.stormware.cz/schema/version_2/stock.xsd" xmlns:ftr="http://www.stormware.cz/schema/version_2/filter.xsd" xmlns:lStk="http://www.stormware.cz/schema/version_2/list_stock.xsd" xmlns:typ="http://www.stormware.cz/schema/version_2/type.xsd" id="Za001" ico="' . (!empty($this->options['ico']) ? $this->options['ico'] : '') . '" application="StwTest" version="2.0" note="Export zásob">
-<dat:dataPackItem id="a55" version="2.0">
-<lStk:listStockRequest version="2.0" stockVersion="2.0">
-<lStk:requestStock>
-<ftr:filter>
-</ftr:filter>
-</lStk:requestStock>
-</lStk:listStockRequest>
-</dat:dataPackItem>
-</dat:dataPack>'); ?></textarea>
-                </div>
-                <button id="send-xml" class="button button-primary">Send Request</button>
-                <div id="xml-response" style="margin-top: 20px;">
-                    <h3>Response</h3>
-                    <pre style="background: #f0f0f0; padding: 10px; overflow: auto; min-height: 200px;"></pre>
-                </div>
-            <?php } ?>
+            <?php endif; ?>
         </div>
         <?php
     }
@@ -615,16 +370,37 @@ class Pohoda_Admin {
         check_ajax_referer('pohoda_nonce', 'nonce');
 
         if (!current_user_can('manage_options')) {
-            wp_send_json_error('Unauthorized');
+            wp_send_json_error(['message' => 'Unauthorized'], 403);
             return;
         }
 
         $batch_size = isset($_POST['batch_size']) ? intval($_POST['batch_size']) : 25;
         $start_id = isset($_POST['start_id']) ? intval($_POST['start_id']) : 0;
 
-        $result = $this->db->sync_products($this->api, $batch_size, $start_id);
+        $result = $this->_handle_sync_db_products_logic($batch_size, $start_id);
 
-        wp_send_json_success($result);
+        if (isset($result['success']) && $result['success']) {
+            wp_send_json_success($result);
+        } else {
+            wp_send_json_error(isset($result['data']) ? $result['data'] : ['message' => 'Failed to sync DB products']);
+        }
+    }
+
+    /**
+     * Internal logic for syncing DB products, returns result array.
+     */
+    private function _handle_sync_db_products_logic($batch_size, $start_id) {
+        // Ensure DB class is available
+        if (!$this->db) {
+            require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-pohoda-db.php';
+            $this->db = new Pohoda_DB();
+        }
+        // Ensure API class is available (db->sync_products might need it indirectly or directly)
+        if (!$this->api) {
+            require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-pohoda-api.php';
+            $this->api = new Pohoda_API(); 
+        }
+        return $this->db->sync_products($this->api, $batch_size, $start_id);
     }
 
     /**
@@ -1007,7 +783,7 @@ class Pohoda_Admin {
         // Get fresh nonce 
         $nonce = wp_create_nonce('pohoda_nonce');
         
-        wp_enqueue_script('pohoda-admin', plugin_dir_url(__FILE__) . 'assets/js/admin.js', array('jquery'), '1.0.0', true);
+        wp_enqueue_script('pohoda-admin', plugin_dir_url(__FILE__) . 'js/pohoda-admin.js', array('jquery'), '1.0.1', true);
         wp_enqueue_script('pohoda-db-products', plugin_dir_url(__FILE__) . 'assets/js/db-products.js', array('jquery'), '1.0.1', true);
         
         wp_localize_script('pohoda-admin', 'pohodaAdmin', array(
@@ -1176,6 +952,101 @@ class Pohoda_Admin {
         add_action('wp_ajax_hide_orphan_wc_product', array($this, 'hide_orphan_wc_product'));
         add_action('wp_ajax_check_db_status', array($this, 'check_db_status'));
         add_action('wp_ajax_force_create_tables', array($this, 'force_create_tables'));
+
+        // New AJAX action for running individual sync wizard steps
+        add_action('wp_ajax_pohoda_run_sync_step', array($this, 'run_sync_step'));
+    }
+
+    // New method to handle sync wizard steps
+    public function run_sync_step() {
+        check_ajax_referer('pohoda_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Unauthorized'], 403);
+            return;
+        }
+
+        $step = isset($_POST['step_name']) ? sanitize_text_field($_POST['step_name']) : '';
+        $this->options = get_option('pohoda_settings'); // Ensure options are loaded
+
+        // Log received step for debugging
+        // error_log('Pohoda Sync Step: ' . $step);
+
+        switch ($step) {
+            case 'check_settings':
+                $this->handle_check_settings_step();
+                break;
+            case 'download_first_products':
+                // Call the internal logic with a defined small batch for the first sync
+                $first_batch_size = 25; // Define how many products for the "first" download
+                $result = $this->_handle_sync_db_products_logic($first_batch_size, 0);
+                if (isset($result['success']) && $result['success']) {
+                    wp_send_json_success($result); // Send the full result which might include counts etc.
+                } else {
+                    wp_send_json_error(isset($result['data']) ? $result['data'] : ['message' => 'Failed during download_first_products step'], 500);
+                }
+                break;
+            case 'sync_rest_products':
+                // Placeholder: This will also use _handle_sync_db_products_logic but needs to manage pagination/offset
+                // For now, let's just call it once like the first step to ensure it works.
+                // We'll need to pass state (next start_id) between JS and PHP for true pagination here.
+                $result = $this->_handle_sync_db_products_logic(100, 0); // Example, assuming next batch after first
+                if (isset($result['success']) && $result['success']) {
+                     wp_send_json_success(['message' => 'Krok sync_rest_products zavolán (s testovací dávkou).', 'data' => $result]);
+                } else {
+                     wp_send_json_error(isset($result['data']) ? $result['data'] : ['message' => 'Failed during sync_rest_products step'], 500);
+                }
+                break;
+            case 'update_pohoda_db':
+                wp_send_json_success(['message' => 'Krok update_pohoda_db zavolán.']);
+                break;
+            case 'update_prices':
+                wp_send_json_success(['message' => 'Krok update_prices zavolán.']);
+                break;
+            case 'update_stock':
+                wp_send_json_success(['message' => 'Krok update_stock zavolán.']);
+                break;
+            case 'reupload_images':
+                wp_send_json_success(['message' => 'Krok reupload_images zavolán.']);
+                break;
+            case 'create_missing_products':
+                wp_send_json_success(['message' => 'Krok create_missing_products zavolán.']);
+                break;
+            case 'check_no_price_products':
+                wp_send_json_success(['message' => 'Krok check_no_price_products zavolán.']);
+                break;
+            case 'check_no_image_products':
+                wp_send_json_success(['message' => 'Krok check_no_image_products zavolán.']);
+                break;
+            case 'finished':
+                wp_send_json_success(['message' => 'Krok finished zavolán.']);
+                break;
+            default:
+                wp_send_json_error(['message' => 'Neznámý krok synchronizace: ' . esc_html($step)], 400);
+                break;
+        }
+    }
+
+    private function handle_check_settings_step() {
+        // Check if essential settings are present
+        $required_settings = ['ip_address', 'port', 'login', 'password', 'ico'];
+        $missing_settings = [];
+
+        foreach ($required_settings as $setting_key) {
+            if (empty($this->options[$setting_key])) {
+                $missing_settings[] = $setting_key;
+            }
+        }
+
+        if (!empty($missing_settings)) {
+            wp_send_json_error([
+                'message' => 'Chybějící nastavení: ' . implode(', ', $missing_settings),
+                'missing' => $missing_settings
+            ], 400);
+        } else {
+            // Optionally, could perform a quick test connection here if desired
+            // For now, just confirming settings exist is enough for this step
+            wp_send_json_success(['message' => 'Nastavení úspěšně zkontrolováno.']);
+        }
     }
 
     /**
