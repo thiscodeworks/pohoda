@@ -44,6 +44,14 @@ class Pohoda_API {
         return $this->api_client->get_last_curl();
     }
     
+    public function get_api_client() {
+        return $this->api_client;
+    }
+
+    public function get_image_service() {
+        return $this->image_service;
+    }
+
     // Keep format_xml public if it was used externally, or make it internal to api_client if not.
     // Based on original class, it was private, so api_client's public format_xml is fine.
     // We can expose it via Pohoda_API if needed for some reason.

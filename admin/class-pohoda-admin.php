@@ -7,6 +7,8 @@ class Pohoda_Admin {
     private $options;
     private $api;
     private $db;
+    private $product_service;
+    private $image_service;
 
     public function __construct() {
         add_action('admin_menu', array($this, 'add_plugin_page'));
@@ -21,8 +23,26 @@ class Pohoda_Admin {
 
         require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-pohoda-api.php';
         require_once plugin_dir_path(dirname(__FILE__)) . 'includes/class-pohoda-db.php';
+        require_once plugin_dir_path(dirname(__FILE__)) . 'includes/pohoda-services/class-pohoda-db-manager.php';
+        require_once plugin_dir_path(dirname(__FILE__)) . 'includes/pohoda-services/class-pohoda-image-service.php';
+        require_once plugin_dir_path(dirname(__FILE__)) . 'includes/pohoda-services/class-pohoda-product-service.php';
+
+        global $wpdb;
+        $this->options = get_option('pohoda_settings');
+        
+        // Initialize core services
         $this->api = new Pohoda_API();
         $this->db = new Pohoda_DB();
+        
+        // Initialize DB Manager
+        $db_manager = new Pohoda_DB_Manager($wpdb);
+        
+        // Initialize Image Service
+        $api_client = $this->api->get_api_client();
+        $this->image_service = new Pohoda_Image_Service($wpdb, $api_client, $db_manager);
+        
+        // Initialize Product Service
+        $this->product_service = new Pohoda_Product_Service($wpdb, $api_client, $this->image_service, $db_manager);
     }
 
     public function add_plugin_page() {
@@ -41,6 +61,12 @@ class Pohoda_Admin {
         $this->options = get_option('pohoda_settings');
         // Determine the active tab, default to 'sync'
         $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'sync';
+        
+        // Check for direct step execution
+        if (isset($_GET['step']) && $_GET['step'] === 'pohoda_analyze') {
+            $this->handle_direct_analyze_step();
+            return;
+        }
         ?>
         <div class="wrap">
             <h1>Pohoda Sync</h1>
@@ -61,14 +87,63 @@ class Pohoda_Admin {
                         <ul id="sync-steps">
                             <li data-step="check_settings">Kontrola nastavení...</li>
                             <li data-step="download_first_products">Stahování úvodních produktů...</li>
-                            <li data-step="sync_rest_products">Synchronizace zbylých produktů...</li>
+                            <li data-step="sync_rest_products">
+                                Synchronizace zbylých produktů...
+                                <div class="sub-progress-container" style="margin: 10px 0 0 0;border: 1px #ccc solid; padding: 5px; display: none;">
+                                    <span class="sub-progress-label"></span>
+                                    <div class="progress-bar-container" style="width: 90%; background-color: #e0e0e0; margin-top: 5px; height: 15px;">
+                                        <div class="progress-bar-inner sub-progress-bar" style="height: 100%; width: 0%; background-color: #1e88e5;"></div>
+                                    </div>
+                                </div>
+                            </li>
                             <li data-step="update_pohoda_db">Aktualizace Pohoda databáze...</li>
                             <li data-step="update_prices">Aktualizace cen...</li>
                             <li data-step="update_stock">Aktualizace skladových zásob...</li>
-                            <li data-step="reupload_images">Nahrávání obrázků...</li>
-                            <li data-step="create_missing_products">Vytváření chybějících produktů...</li>
-                            <li data-step="check_no_price_products">Kontrola produktů bez ceny...</li>
-                            <li data-step="check_no_image_products">Kontrola produktů bez obrázků...</li>
+                            <li data-step="reupload_images">
+                                Nahrávání obrázků...
+                                <div class="sub-progress-container" style="margin-left: 20px; display: none;">
+                                    <span class="sub-progress-label"></span>
+                                    <div class="progress-bar-container" style="width: 90%; background-color: #e0e0e0; margin-top: 5px; height: 15px;">
+                                        <div class="progress-bar-inner sub-progress-bar" style="height: 100%; width: 0%; background-color: #1e88e5;"></div>
+                                    </div>
+                                </div>
+                            </li>
+                            <li data-step="create_missing_products">
+                                Vytváření chybějících produktů...
+                                <div class="sub-progress-container" style="margin-left: 20px; display: none;">
+                                    <span class="sub-progress-label"></span>
+                                    <div class="progress-bar-container" style="width: 90%; background-color: #e0e0e0; margin-top: 5px; height: 15px;">
+                                        <div class="progress-bar-inner sub-progress-bar" style="height: 100%; width: 0%; background-color: #1e88e5;"></div>
+                                    </div>
+                                </div>
+                            </li>
+                            <li data-step="check_orphan_products_and_hide">
+                                Kontrola osiřelých produktů ve WooCommerce (a skrytí)...
+                                <div class="sub-progress-container" style="margin-left: 20px; display: none;">
+                                    <span class="sub-progress-label"></span>
+                                    <div class="progress-bar-container" style="width: 90%; background-color: #e0e0e0; margin-top: 5px; height: 15px;">
+                                        <div class="progress-bar-inner sub-progress-bar" style="height: 100%; width: 0%; background-color: #1e88e5;"></div>
+                                    </div>
+                                </div>
+                            </li>
+                            <li data-step="check_no_price_products_and_hide">
+                                Kontrola produktů bez ceny (a skrytí)...
+                                <div class="sub-progress-container" style="margin-left: 20px; display: none;">
+                                    <span class="sub-progress-label"></span>
+                                    <div class="progress-bar-container" style="width: 90%; background-color: #e0e0e0; margin-top: 5px; height: 15px;">
+                                        <div class="progress-bar-inner sub-progress-bar" style="height: 100%; width: 0%; background-color: #1e88e5;"></div>
+                                    </div>
+                                </div>
+                            </li>
+                            <li data-step="check_no_image_products_and_hide">
+                                Kontrola produktů bez obrázků (a skrytí)...
+                                <div class="sub-progress-container" style="margin-left: 20px; display: none;">
+                                    <span class="sub-progress-label"></span>
+                                    <div class="progress-bar-container" style="width: 90%; background-color: #e0e0e0; margin-top: 5px; height: 15px;">
+                                        <div class="progress-bar-inner sub-progress-bar" style="height: 100%; width: 0%; background-color: #1e88e5;"></div>
+                                    </div>
+                                </div>
+                            </li>
                             <li data-step="finished">Dokončeno</li>
                         </ul>
                         <div class="progress-bar-container" style="width: 100%; background-color: #f0f0f0; border-radius: 4px; margin-top:10px;">
@@ -976,55 +1051,45 @@ class Pohoda_Admin {
                 $this->handle_check_settings_step();
                 break;
             case 'download_first_products':
-                // Call the internal logic with a defined small batch for the first sync
-                $first_batch_size = 25; // Define how many products for the "first" download
-                $result = $this->_handle_sync_db_products_logic($first_batch_size, 0);
+                $first_batch_size = 25; 
+                $result = $this->_handle_sync_db_products_logic($first_batch_size, 0); 
                 if (isset($result['success']) && $result['success']) {
-                    wp_send_json_success($result); // Send the full result which might include counts etc.
+                    wp_send_json_success($result); 
                 } else {
                     $error_message = isset($result['message']) ? $result['message'] : 'Failed during download_first_products step.';
-                    $error_data = isset($result['data']) ? $result['data'] : []; // Store original data if any
-                    if (isset($result['errors']) && is_array($result['errors'])) {
-                        $error_message .= ' Details: ' . implode(', ', $result['errors']);
+                    if (isset($result['errors']) && !empty($result['errors'])) {
+                        $error_message .= " Details: " . implode(", ", $result['errors']);
                     }
-                    pohoda_debug_log("Pohoda_Admin: download_first_products error - Message: {$error_message} - Full Result: " . print_r($result, true));
-                    wp_send_json_error(['message' => $error_message, 'original_data' => $error_data, 'full_response' => $result], 500);
+                    pohoda_debug_log("PohodaAdmin Error in download_first_products: " . print_r($result, true));
+                    wp_send_json_error(['message' => $error_message, 'original_data' => ($result['data'] ?? []), 'full_response' => $result]);
                 }
                 break;
             case 'sync_rest_products':
-                $result = $this->_handle_sync_db_products_logic(100, 0); // Example, assuming next batch after first
-                if (isset($result['success']) && $result['success']) {
-                     wp_send_json_success(['message' => 'Krok sync_rest_products zavolán (s testovací dávkou).', 'data' => $result]);
-                } else {
-                    $error_message = isset($result['message']) ? $result['message'] : 'Failed during sync_rest_products step.';
-                    $error_data = isset($result['data']) ? $result['data'] : [];
-                    if (isset($result['errors']) && is_array($result['errors'])) {
-                        $error_message .= ' Details: ' . implode(', ', $result['errors']);
-                    }
-                    pohoda_debug_log("Pohoda_Admin: sync_rest_products error - Message: {$error_message} - Full Result: " . print_r($result, true));
-                    wp_send_json_error(['message' => $error_message, 'original_data' => $error_data, 'full_response' => $result], 500);
-                }
+                $this->handle_sync_rest_products_step();
                 break;
             case 'update_pohoda_db':
-                wp_send_json_success(['message' => 'Krok update_pohoda_db zavolán.']);
+                $this->handle_analyze_db_vs_wc_step();
                 break;
             case 'update_prices':
-                wp_send_json_success(['message' => 'Krok update_prices zavolán.']);
+                $this->handle_update_prices_step();
                 break;
             case 'update_stock':
-                wp_send_json_success(['message' => 'Krok update_stock zavolán.']);
+                $this->handle_update_stock_step();
                 break;
             case 'reupload_images':
-                wp_send_json_success(['message' => 'Krok reupload_images zavolán.']);
+                $this->handle_reupload_images_step();
                 break;
             case 'create_missing_products':
-                wp_send_json_success(['message' => 'Krok create_missing_products zavolán.']);
+                $this->handle_create_missing_products_step();
                 break;
-            case 'check_no_price_products':
-                wp_send_json_success(['message' => 'Krok check_no_price_products zavolán.']);
+            case 'check_orphan_products_and_hide':
+                $this->handle_check_orphan_products_step();
                 break;
-            case 'check_no_image_products':
-                wp_send_json_success(['message' => 'Krok check_no_image_products zavolán.']);
+            case 'check_no_price_products_and_hide':
+                $this->handle_no_price_products_step();
+                break;
+            case 'check_no_image_products_and_hide':
+                $this->handle_no_image_products_step();
                 break;
             case 'finished':
                 wp_send_json_success(['message' => 'Krok finished zavolán.']);
@@ -1035,6 +1100,9 @@ class Pohoda_Admin {
         }
     }
 
+    /**
+     * Handles the 'check_settings' step of the sync wizard.
+     */
     private function handle_check_settings_step() {
         // Check if essential settings are present
         $required_settings = ['ip_address', 'port', 'login', 'password', 'ico'];
@@ -1059,16 +1127,358 @@ class Pohoda_Admin {
     }
 
     /**
-     * Check if WooCommerce is active
-     *
-     * @return bool True if WooCommerce is active, false otherwise
+     * Handles the 'sync_rest_products' step of the sync wizard.
+     * Loops through remaining products in batches.
      */
-    private function woocommerce_active() {
-        return class_exists('WooCommerce');
+    private function handle_sync_rest_products_step() {
+        check_ajax_referer('pohoda_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Unauthorized'], 403);
+            return;
+        }
+
+        $start_id = isset($_POST['pohoda_last_sync_id']) ? intval($_POST['pohoda_last_sync_id']) : 0;
+        $initial_has_more = isset($_POST['pohoda_sync_has_more']) ? filter_var($_POST['pohoda_sync_has_more'], FILTER_VALIDATE_BOOLEAN) : true;
+        $processed_in_step = isset($_POST['processed_in_step']) ? intval($_POST['processed_in_step']) : 0;
+
+        if (!$initial_has_more && $start_id > 0) { 
+            wp_send_json_success([
+                'message' => 'No more products to sync based on prior step.',
+                'batch_fetched' => 0, 'batch_inserted' => 0, 'batch_updated' => 0, 
+                'batch_images_synced' => 0, 'errors' => [], 'current_last_id' => $start_id,
+                'current_has_more' => false, // Explicitly false
+                'processed_total_in_step' => $processed_in_step 
+            ]);
+            return;
+        }
+        
+        $batch_size_rest = 100; 
+        pohoda_debug_log("PohodaAdmin: handle_sync_rest_products_step (single batch). Start ID: {$start_id}");
+
+        $batch_result = $this->_handle_sync_db_products_logic($batch_size_rest, $start_id);
+
+        if (!$batch_result || !isset($batch_result['success'])) {
+             pohoda_debug_log("PohodaAdmin: sync_rest_products critical error in single batch. Result: " . print_r($batch_result, true));
+            wp_send_json_error([
+                'message' => "Critical error processing batch at start_id {$start_id}.", 
+                'errors' => ["Critical error processing batch at start_id {$start_id}."],
+                'current_last_id' => $start_id, 
+                'current_has_more' => $initial_has_more, // Propagate old has_more on critical failure
+                'processed_total_in_step' => $processed_in_step
+            ]);
+            return;
+        }
+
+        $current_processed_in_step = $processed_in_step + ($batch_result['total_fetched'] ?? 0);
+
+        $response_data = [
+            'message' => sprintf("Batch from ID %d processed. Fetched: %d, Inserted: %d, Updated: %d.", 
+                                $start_id, 
+                                $batch_result['total_fetched'] ?? 0, 
+                                $batch_result['total_inserted'] ?? 0, 
+                                $batch_result['total_updated'] ?? 0
+                            ),
+            'batch_fetched' => $batch_result['total_fetched'] ?? 0,
+            'batch_inserted' => $batch_result['total_inserted'] ?? 0,
+            'batch_updated' => $batch_result['total_updated'] ?? 0,
+            'batch_images_synced' => $batch_result['images_synced_total'] ?? 0,
+            'errors' => $batch_result['errors'] ?? [],
+            'current_last_id' => $batch_result['last_id'] ?? $start_id,
+            'current_has_more' => isset($batch_result['has_more']) ? $batch_result['has_more'] : false,
+            'success' => $batch_result['success'], // Propagate success status from the batch logic
+            'processed_total_in_step' => $current_processed_in_step
+        ];
+        
+        pohoda_debug_log("PohodaAdmin: handle_sync_rest_products_step (single batch) response: " . print_r($response_data, true));
+
+        if ($response_data['success']) {
+            wp_send_json_success($response_data);
+        } else {
+            // If batch_result success is false, but we have data, send it as error data
+            wp_send_json_error($response_data); 
+        }
     }
 
     /**
-     * Find WooCommerce products that are not in Pohoda database
+     * Handles the 'update_pohoda_db' step of the sync wizard, 
+     * which now analyzes the local DB against WooCommerce.
+     */
+    public function handle_analyze_db_vs_wc_step() {
+        pohoda_debug_log("PohodaAdmin: Starting analyze_db_vs_wc step");
+        
+        if (!$this->ensure_product_service()) {
+            pohoda_debug_log("PohodaAdmin Error: Could not ensure product service for analyze_db_vs_wc step");
+            wp_send_json_error(['message' => 'Product service not available.'], 500);
+            return;
+        }
+
+        try {
+            pohoda_debug_log("PohodaAdmin: Analyzing local database against WooCommerce");
+            $result = $this->product_service->analyze_local_db_vs_wc();
+            
+            if (is_wp_error($result)) {
+                pohoda_debug_log("PohodaAdmin Error: " . $result->get_error_message());
+                wp_send_json_error(['message' => $result->get_error_message()], 500);
+                return;
+            }
+            
+            pohoda_debug_log("PohodaAdmin: Analysis completed successfully");
+            wp_send_json_success([
+                'message' => 'Analysis completed successfully',
+                'data' => $result
+            ]);
+            
+        } catch (Exception $e) {
+            pohoda_debug_log("PohodaAdmin Error: " . $e->getMessage());
+            wp_send_json_error(['message' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Handles the 'update_prices' step of the sync wizard.
+     */
+    private function handle_update_prices_step() {
+        check_ajax_referer('pohoda_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Unauthorized'], 403);
+            return;
+        }
+        pohoda_debug_log("PohodaAdmin: Starting 'update_prices' step.");
+
+        if (!$this->ensure_product_service()) { // Helper to ensure service is ready
+            return; // ensure_product_service sends JSON error on failure
+        }
+
+        // This method should exist in Pohoda_Product_Service
+        // It should iterate all relevant products and update their prices in WC.
+        // It should return stats like { success: true/false, updated_count: X, failed_count: Y, errors: [...] }
+        $result = $this->product_service->update_all_wc_prices_from_db(); 
+
+        if (isset($result['success']) && $result['success']) {
+            $message = sprintf("Aktualizace cen dokončena. Aktualizováno: %d, Selhalo: %d.", 
+                $result['updated_count'] ?? 0, 
+                $result['failed_count'] ?? 0
+            );
+            if (!empty($result['errors'])) {
+                $message .= " Chyby: " . implode("; ", $result['errors']);
+            }
+            pohoda_debug_log("PohodaAdmin: 'update_prices' step completed. " . $message);
+            wp_send_json_success(['message' => $message, 'data' => $result]);
+        } else {
+            $error_message = "Chyba při aktualizaci cen.";
+            if (isset($result['message'])) $error_message = $result['message'];
+            else if (!empty($result['errors'])) $error_message .= " Detaily: " . implode("; ", $result['errors']);
+            pohoda_debug_log("PohodaAdmin: 'update_prices' step failed. " . $error_message);
+            wp_send_json_error(['message' => $error_message, 'data' => $result]);
+        }
+    }
+
+    /**
+     * Handles the 'update_stock' step of the sync wizard.
+     */
+    private function handle_update_stock_step() {
+        check_ajax_referer('pohoda_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Unauthorized'], 403);
+            return;
+        }
+        pohoda_debug_log("PohodaAdmin: Starting 'update_stock' step.");
+
+        if (!$this->ensure_product_service()) { 
+            return; 
+        }
+
+        // This method should exist in Pohoda_Product_Service
+        // It should iterate all relevant products and update their stock in WC.
+        // It should return stats like { success: true/false, updated_count: X, failed_count: Y, errors: [...] }
+        $result = $this->product_service->update_all_wc_stock_from_db();
+
+        if (isset($result['success']) && $result['success']) {
+            $message = sprintf("Aktualizace skladů dokončena. Aktualizováno: %d, Selhalo: %d.", 
+                $result['updated_count'] ?? 0, 
+                $result['failed_count'] ?? 0
+            );
+            if (!empty($result['errors'])) {
+                $message .= " Chyby: " . implode("; ", $result['errors']);
+            }
+            pohoda_debug_log("PohodaAdmin: 'update_stock' step completed. " . $message);
+            wp_send_json_success(['message' => $message, 'data' => $result]);
+        } else {
+            $error_message = "Chyba při aktualizaci skladů.";
+            if (isset($result['message'])) $error_message = $result['message'];
+            else if (!empty($result['errors'])) $error_message .= " Detaily: " . implode("; ", $result['errors']);
+            pohoda_debug_log("PohodaAdmin: 'update_stock' step failed. " . $error_message);
+            wp_send_json_error(['message' => $error_message, 'data' => $result]);
+        }
+    }
+    
+    /**
+     * Handles the 'reupload_images' step of the sync wizard.
+     * Loops through pending images in batches.
+     */
+    private function handle_reupload_images_step() {
+        check_ajax_referer('pohoda_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Unauthorized'], 403);
+            return;
+        }
+        pohoda_debug_log("PohodaAdmin: Starting 'reupload_images' step.");
+
+        if (!$this->ensure_image_service()) { // Helper to ensure image service is ready
+            return; // ensure_image_service sends JSON error on failure
+        }
+
+        $batch_limit = isset($_POST['batch_limit']) ? intval($_POST['batch_limit']) : 20; // Use limit from service default or POST
+        $processed_in_step = isset($_POST['processed_in_step']) ? intval($_POST['processed_in_step']) : 0;
+        $total_synced_in_step = isset($_POST['total_synced_in_step']) ? intval($_POST['total_synced_in_step']) : 0;
+        $total_failed_in_step = isset($_POST['total_failed_in_step']) ? intval($_POST['total_failed_in_step']) : 0;
+
+        // Call the service method which processes one batch of pending images
+        $result = $this->image_service->sync_pending_images_to_woocommerce($batch_limit);
+
+        if (isset($result['success'])) { // Service method should always return success key
+            $current_batch_synced = $result['synced_now'] ?? 0;
+            $current_batch_failed = count($result['errors'] ?? []);
+            $pending_found_in_batch = $result['total_pending_found'] ?? 0; // How many were pending before this batch ran
+
+            $total_synced_in_step += $current_batch_synced;
+            $total_failed_in_step += $current_batch_failed;
+            // processed_in_step could be the number of images attempted in this call by the service, which is $pending_found_in_batch if <= $batch_limit
+            // or $batch_limit if $pending_found_in_batch > $batch_limit.
+            // A simpler way is to count images that were pending for this batch.
+            $processed_this_batch = $pending_found_in_batch; //This is the number of items the service attempted from the pending queue.
+            $processed_in_step += $processed_this_batch; 
+
+            $message = sprintf("Spracovaná dávka obrázkov. Synchronizované v tejto dávke: %d. Chyby v tejto dávke: %d.", 
+                $current_batch_synced, 
+                $current_batch_failed
+            );
+
+            $response_data = [
+                'message' => $message,
+                'batch_synced' => $current_batch_synced,
+                'batch_failed' => $current_batch_failed,
+                'batch_attempted' => $processed_this_batch, // How many items the service looked at for this batch
+                'total_synced_in_step' => $total_synced_in_step,
+                'total_failed_in_step' => $total_failed_in_step,
+                'processed_total_in_step' => $processed_in_step, // Total items looked at across all batches for this step
+                'errors' => $result['errors'] ?? [],
+                // If pending_found_in_batch > 0 (or == batch_limit), it implies there might be more.
+                // The service method returns total_pending_found for *this specific call*, not overall.
+                // So, if total_pending_found for this batch was equal to the batch_limit, assume there are more.
+                'current_has_more' => ($pending_found_in_batch >= $batch_limit && $batch_limit > 0),
+                'success' => $result['success'] // Overall success of this batch operation from service
+            ];
+            pohoda_debug_log("PohodaAdmin: 'reupload_images' batch completed. " . print_r($response_data, true));
+            wp_send_json_success($response_data);
+
+        } else {
+            $error_message = "Chyba pri synchronizácii obrázkov.";
+            if (isset($result['message'])) $error_message = $result['message'];
+            else if (!empty($result['errors'])) $error_message .= " Detaily: " . implode("; ", $result['errors']);
+            pohoda_debug_log("PohodaAdmin: 'reupload_images' step failed. " . $error_message);
+            wp_send_json_error(['message' => $error_message, 'data' => $result]);
+        }
+    }
+    
+    /**
+     * Helper function to ensure $this->product_service is initialized.
+     * Sends JSON error and returns false if service cannot be initialized.
+     * @return bool True if service is ready, false otherwise.
+     */
+    private function ensure_product_service() {
+        if (isset($this->product_service) && $this->product_service instanceof Pohoda_Product_Service) {
+            return true;
+        }
+
+        if (isset($this->api) && method_exists($this->api, 'get_product_service') && $this->api->get_product_service() instanceof Pohoda_Product_Service) {
+            $this->product_service = $this->api->get_product_service();
+            return true;
+        } 
+        
+        if (class_exists('Pohoda_Product_Service') && class_exists('Pohoda_DB_Manager') && class_exists('Pohoda_API_Client')) {
+            global $wpdb;
+
+            $db_manager_instance = null;
+            if (isset($this->db) && method_exists($this->db, 'get_db_manager') && $this->db->get_db_manager() instanceof Pohoda_DB_Manager) {
+                 $db_manager_instance = $this->db->get_db_manager();
+            } else {
+                 $db_manager_instance = new Pohoda_DB_Manager($wpdb);
+            }
+
+            $api_client_instance = null;
+            if (isset($this->api) && method_exists($this->api, 'get_api_client')) {
+                $api_client_instance = $this->api->get_api_client();
+            }
+
+            if (!$api_client_instance) {
+                pohoda_debug_log("PohodaAdmin Error: Could not obtain a valid Pohoda_API_Client instance for Product Service.");
+                wp_send_json_error(['message' => 'API client for Product Service not available.'], 500);
+                return false;
+            }
+
+            if (!$db_manager_instance) {
+                pohoda_debug_log("PohodaAdmin Error: Could not obtain a valid DB Manager instance for Product Service.");
+                wp_send_json_error(['message' => 'DB Manager for Product Service not available.'], 500);
+                return false;
+            }
+
+            // Ensure image service is available
+            if (!$this->ensure_image_service()) {
+                return false;
+            }
+            
+            // Initialize Product Service with required dependencies
+            $this->product_service = new Pohoda_Product_Service($wpdb, $api_client_instance, $this->image_service, $db_manager_instance);
+            return true;
+        } else {
+            $missing_classes = [];
+            if (!class_exists('Pohoda_Product_Service')) $missing_classes[] = 'Pohoda_Product_Service';
+            if (!class_exists('Pohoda_DB_Manager')) $missing_classes[] = 'Pohoda_DB_Manager';
+            if (!class_exists('Pohoda_API_Client')) $missing_classes[] = 'Pohoda_API_Client';
+
+            pohoda_debug_log("PohodaAdmin Error: Pohoda_Product_Service or its core dependencies not available. Missing: " . implode(", ", $missing_classes));
+            wp_send_json_error(['message' => 'Product Service or its core dependencies not available. Missing: ' . implode(", ", $missing_classes)], 500);
+            return false;
+        }
+    }
+
+    /**
+     * Helper function to ensure $this->image_service is initialized.
+     * Sends JSON error and returns false if service cannot be initialized.
+     * @return bool True if service is ready, false otherwise.
+     */
+    private function ensure_image_service() {
+        if (isset($this->image_service) && $this->image_service instanceof Pohoda_Image_Service) {
+            return true;
+        }
+
+        if (class_exists('Pohoda_Image_Service')) {
+            global $wpdb;
+            if (!$this->api || !method_exists($this->api, 'get_api_client')) {
+                pohoda_debug_log("PohodaAdmin Error: API client not available for Image Service");
+                wp_send_json_error(['message' => 'API client not available for Image Service.'], 500);
+                return false;
+            }
+            if (!$this->db || !method_exists($this->db, 'get_db_manager')) {
+                pohoda_debug_log("PohodaAdmin Error: DB Manager not available for Image Service");
+                wp_send_json_error(['message' => 'DB Manager not available for Image Service.'], 500);
+                return false;
+            }
+
+            $api_client = $this->api->get_api_client();
+            $db_manager = $this->db->get_db_manager();
+            $this->image_service = new Pohoda_Image_Service($wpdb, $api_client, $db_manager);
+            return true;
+        }
+
+        pohoda_debug_log("PohodaAdmin Error: Pohoda_Image_Service not available");
+        wp_send_json_error(['message' => 'Image service not available.'], 500);
+        return false;
+    }
+
+    /**
+     * AJAX handler to get product categories from the database.
      */
     public function find_orphan_wc_products() {
         // Log when the function is called
@@ -1324,5 +1734,327 @@ class Pohoda_Admin {
 
         $result = $this->api->force_create_tables();
         wp_send_json_success($result);
+    }
+
+    /**
+     * Check if WooCommerce is active
+     *
+     * @return bool True if WooCommerce is active, false otherwise
+     */
+    private function woocommerce_active() {
+        return class_exists('WooCommerce');
+    }
+
+    /**
+     * Handles the 'create_missing_products' step of the sync wizard.
+     * Can fetch a list of missing products or process a batch to create them.
+     */
+    private function handle_create_missing_products_step() {
+        check_ajax_referer('pohoda_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Unauthorized'], 403);
+            return;
+        }
+
+        if (!$this->ensure_product_service()) { 
+            return; 
+        }
+
+        $sub_action = isset($_POST['sub_action']) ? sanitize_text_field($_POST['sub_action']) : 'fetch_list';
+        pohoda_debug_log("PohodaAdmin: Starting 'create_missing_products' step. Sub-action: {$sub_action}");
+
+        if ($sub_action === 'fetch_list') {
+            // This service method needs to be implemented in Pohoda_Product_Service
+            // It should return an array like ['success' => true, 'products' => [...list of product data...], 'total' => count]
+            $result = $this->product_service->get_all_products_missing_in_wc(); 
+
+            if (isset($result['success']) && $result['success']) {
+                pohoda_debug_log("PohodaAdmin: Fetched list of missing products. Count: " . ($result['total'] ?? count($result['products'] ?? [])));
+                wp_send_json_success([
+                    'message' => 'Seznam chybějících produktů načten.',
+                    'products_to_create' => $result['products'] ?? [],
+                    'total_missing' => $result['total'] ?? count($result['products'] ?? [])
+                ]);
+            } else {
+                $error_msg = "Chyba při načítání seznamu chybějících produktů: " . ($result['message'] ?? 'Neznámá chyba služby.');
+                pohoda_debug_log("PohodaAdmin: Error fetching list of missing products - {$error_msg}");
+                wp_send_json_error(['message' => $error_msg]);
+            }
+        } elseif ($sub_action === 'process_batch') {
+            $products_batch = isset($_POST['products_batch']) && is_array($_POST['products_batch']) ? $_POST['products_batch'] : [];
+            $current_offset = isset($_POST['current_offset']) ? intval($_POST['current_offset']) : 0;
+            // $total_being_processed = isset($_POST['total_to_process']) ? intval($_POST['total_to_process']) : count($products_batch); // Total from the list JS is iterating
+
+            if (empty($products_batch)) {
+                wp_send_json_error(['message' => 'Žádné produkty v dávce ke zpracování.']);
+                return;
+            }
+
+            $created_count = 0;
+            $failed_count = 0;
+            $batch_errors = [];
+
+            foreach ($products_batch as $product_data) {
+                if (empty($product_data['code']) || empty($product_data['name'])) {
+                    $failed_count++;
+                    $batch_errors[] = "Produkt ID {$product_data['id']}: Chybí kód nebo název.";
+                    continue;
+                }
+
+                $existing_wc_id = wc_get_product_id_by_sku($product_data['code']);
+                if ($existing_wc_id) {
+                    $failed_count++;
+                    $batch_errors[] = "Produkt '{$product_data['name']}' (kód: {$product_data['code']}): Již existuje ve WooCommerce (WC ID: {$existing_wc_id}).";
+                    // Update local DB to reflect that this product exists in WC
+                    $this->product_service->update_local_product_wc_status_after_check($product_data['id'], $existing_wc_id);
+                    continue;
+                }
+                
+                $wc_product = new WC_Product_Simple();
+                $wc_product->set_name($product_data['name']);
+                $wc_product->set_sku($product_data['code']);
+                
+                $vat_rate = isset($product_data['vat_rate']) ? (float)$product_data['vat_rate'] : 21.0;
+                $price_with_vat = (float)($product_data['selling_price'] ?? 0) * (1 + ($vat_rate / 100));
+                $wc_product->set_regular_price(wc_format_decimal($price_with_vat, wc_get_price_decimals()));
+
+                $stock_quantity = isset($product_data['count']) ? (int)$product_data['count'] : 0;
+                $wc_product->set_manage_stock(true);
+                $wc_product->set_stock_quantity($stock_quantity);
+                $wc_product->set_stock_status($stock_quantity > 0 ? 'instock' : 'outofstock');
+                $wc_product->set_status('publish');
+
+                try {
+                    $new_wc_product_id = $wc_product->save();
+                    if ($new_wc_product_id) {
+                        $created_count++;
+                        $this->product_service->update_local_product_wc_status_after_check($product_data['id'], $new_wc_product_id);
+                        // Potentially sync images for this new product if desired immediately
+                        // if (!empty($product_data['pictures'])) {
+                        //    $this->ensure_image_service();
+                        //    if($this->image_service) $this->image_service->sync_product_images($product_data['id'], $product_data['pictures']);
+                        // }
+                    } else {
+                        $failed_count++;
+                        $batch_errors[] = "Produkt '{$product_data['name']}' (kód: {$product_data['code']}): Nepodařilo se uložit do WooCommerce.";
+                    }
+                } catch (Exception $e) {
+                    $failed_count++;
+                    $batch_errors[] = "Produkt '{$product_data['name']}' (kód: {$product_data['code']}): Výjimka při ukládání - " . $e->getMessage();
+                }
+            }
+            pohoda_debug_log("PohodaAdmin: 'create_missing_products' batch processed. Created: {$created_count}, Failed: {$failed_count}");
+            wp_send_json_success([
+                'message' => sprintf("Dávka zpracována. Vytvořeno: %d, Selhalo: %d.", $created_count, $failed_count),
+                'batch_created' => $created_count,
+                'batch_failed' => $failed_count,
+                'batch_errors' => $batch_errors
+            ]);
+
+        } else {
+            wp_send_json_error(['message' => 'Neznámá sub-akce pro vytváření produktů.']);
+        }
+    }
+
+    /**
+     * Handles checking for orphan products in WooCommerce and hiding them.
+     */
+    private function handle_check_orphan_products_step() {
+        check_ajax_referer('pohoda_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(['message' => 'Unauthorized'], 403);
+            return;
+        }
+        if (!$this->ensure_product_service()) { return; }
+
+        $sub_action = isset($_POST['sub_action']) ? sanitize_text_field($_POST['sub_action']) : 'fetch_list';
+        pohoda_debug_log("PohodaAdmin: 'check_orphan_products_and_hide' step. Sub-action: {$sub_action}");
+
+        if ($sub_action === 'fetch_list') {
+            // Method to be implemented in Pohoda_Product_Service
+            // Should return ['success' => true, 'product_ids' => [id1, id2,...], 'total' => count]
+            $result = $this->product_service->get_orphan_woocommerce_product_ids(); 
+            if (isset($result['success']) && $result['success']) {
+                wp_send_json_success([
+                    'message' => 'Seznam osiřelých produktů načten.',
+                    'product_ids_to_hide' => $result['product_ids'] ?? [],
+                    'total_to_hide' => $result['total'] ?? count($result['product_ids'] ?? [])
+                ]);
+            } else {
+                wp_send_json_error(['message' => 'Chyba při načítání osiřelých produktů: ' . ($result['message'] ?? 'Neznámá chyba služby.')]);
+            }
+        } elseif ($sub_action === 'process_batch') {
+            $product_ids_batch = isset($_POST['product_ids_batch']) && is_array($_POST['product_ids_batch']) ? array_map('intval', $_POST['product_ids_batch']) : [];
+            if (empty($product_ids_batch)) {
+                wp_send_json_error(['message' => 'Žádné ID produktů v dávce ke zpracování.']);
+                return;
+            }
+            $hidden_count = 0; $failed_count = 0; $batch_errors = [];
+
+            foreach ($product_ids_batch as $product_id) {
+                if (wc_get_product($product_id)) {
+                    wp_update_post(['ID' => $product_id, 'post_status' => 'private']);
+                    // Optionally: $product->set_catalog_visibility('hidden'); $product->save();
+                    $hidden_count++;
+                } else {
+                    $failed_count++;
+                    $batch_errors[] = "Produkt ID {$product_id} nenalezen pro skrytí.";
+                }
+            }
+            wp_send_json_success([
+                'message' => sprintf("Dávka osiřelých produktů zpracována. Skryto: %d, Selhalo: %d.", $hidden_count, $failed_count),
+                'batch_hidden' => $hidden_count, 'batch_failed' => $failed_count, 'batch_errors' => $batch_errors
+            ]);
+        } else {
+            wp_send_json_error(['message' => 'Neznámá sub-akce pro kontrolu osiřelých produktů.']);
+        }
+    }
+
+    /**
+     * Handles checking for products with no price and hiding them.
+     */
+    private function handle_no_price_products_step() {
+        check_ajax_referer('pohoda_nonce', 'nonce');
+        if (!current_user_can('manage_options')) { wp_send_json_error(['message' => 'Unauthorized'], 403); return; }
+        if (!$this->ensure_product_service()) { return; }
+
+        $sub_action = isset($_POST['sub_action']) ? sanitize_text_field($_POST['sub_action']) : 'fetch_list';
+        pohoda_debug_log("PohodaAdmin: 'check_no_price_products_and_hide' step. Sub-action: {$sub_action}");
+
+        if ($sub_action === 'fetch_list') {
+            // Method to be implemented in Pohoda_Product_Service
+            // Should return ['success' => true, 'product_ids' => [id1, id2,...], 'total' => count]
+            $result = $this->product_service->get_wc_product_ids_with_no_price();
+             if (isset($result['success']) && $result['success']) {
+                wp_send_json_success([
+                    'message' => 'Seznam produktů bez ceny načten.',
+                    'product_ids_to_hide' => $result['product_ids'] ?? [],
+                    'total_to_hide' => $result['total'] ?? count($result['product_ids'] ?? [])
+                ]);
+            } else {
+                wp_send_json_error(['message' => 'Chyba při načítání produktů bez ceny: ' . ($result['message'] ?? 'Neznámá chyba služby.')]);
+            }
+        } elseif ($sub_action === 'process_batch') {
+            $product_ids_batch = isset($_POST['product_ids_batch']) && is_array($_POST['product_ids_batch']) ? array_map('intval', $_POST['product_ids_batch']) : [];
+            if (empty($product_ids_batch)) { wp_send_json_error(['message' => 'Žádné ID produktů v dávce ke zpracování.']); return; }
+            $hidden_count = 0; $failed_count = 0; $batch_errors = [];
+            foreach ($product_ids_batch as $product_id) {
+                if (wc_get_product($product_id)) {
+                    wp_update_post(['ID' => $product_id, 'post_status' => 'private']);
+                    $hidden_count++;
+                } else { $failed_count++; $batch_errors[] = "Produkt ID {$product_id} nenalezen pro skrytí (bez ceny)."; }
+            }
+            wp_send_json_success([
+                'message' => sprintf("Dávka produktů bez ceny zpracována. Skryto: %d, Selhalo: %d.", $hidden_count, $failed_count),
+                'batch_hidden' => $hidden_count, 'batch_failed' => $failed_count, 'batch_errors' => $batch_errors
+            ]);
+        } else {
+            wp_send_json_error(['message' => 'Neznámá sub-akce pro kontrolu produktů bez ceny.']);
+        }
+    }
+
+    /**
+     * Handles checking for products with no images and hiding them.
+     */
+    private function handle_no_image_products_step() {
+        check_ajax_referer('pohoda_nonce', 'nonce');
+        if (!current_user_can('manage_options')) { wp_send_json_error(['message' => 'Unauthorized'], 403); return; }
+        if (!$this->ensure_product_service()) { return; } // Product service might not be strictly needed if all logic is WC direct
+
+        $sub_action = isset($_POST['sub_action']) ? sanitize_text_field($_POST['sub_action']) : 'fetch_list';
+        pohoda_debug_log("PohodaAdmin: 'check_no_image_products_and_hide' step. Sub-action: {$sub_action}");
+
+        if ($sub_action === 'fetch_list') {
+            // Method to be implemented in Pohoda_Product_Service or directly here
+            // Should return ['success' => true, 'product_ids' => [id1, id2,...], 'total' => count]
+            $result = $this->product_service->get_wc_product_ids_with_no_images(); // Assumes method in product service
+             if (isset($result['success']) && $result['success']) {
+                wp_send_json_success([
+                    'message' => 'Seznam produktů bez obrázků načten.',
+                    'product_ids_to_hide' => $result['product_ids'] ?? [],
+                    'total_to_hide' => $result['total'] ?? count($result['product_ids'] ?? [])
+                ]);
+            } else {
+                wp_send_json_error(['message' => 'Chyba při načítání produktů bez obrázků: ' . ($result['message'] ?? 'Neznámá chyba služby.')]);
+            }
+        } elseif ($sub_action === 'process_batch') {
+            $product_ids_batch = isset($_POST['product_ids_batch']) && is_array($_POST['product_ids_batch']) ? array_map('intval', $_POST['product_ids_batch']) : [];
+            if (empty($product_ids_batch)) { wp_send_json_error(['message' => 'Žádné ID produktů v dávce ke zpracování.']); return; }
+            $hidden_count = 0; $failed_count = 0; $batch_errors = [];
+            foreach ($product_ids_batch as $product_id) {
+                $product = wc_get_product($product_id);
+                if ($product && !$product->get_image_id()) { // Check if image ID is empty
+                    wp_update_post(['ID' => $product_id, 'post_status' => 'private']);
+                    $hidden_count++;
+                } else if (!$product) {
+                    $failed_count++; $batch_errors[] = "Produkt ID {$product_id} nenalezen pro skrytí (bez obrázku).";
+                } else {
+                    // Product exists and has an image, so don't count as failed if the goal is to hide *only those without*
+                }
+            }
+            wp_send_json_success([
+                'message' => sprintf("Dávka produktů bez obrázků zpracována. Skryto: %d, Selhalo (nenalezeno): %d.", $hidden_count, $failed_count),
+                'batch_hidden' => $hidden_count, 'batch_failed' => $failed_count, 'batch_errors' => $batch_errors
+            ]);
+        } else {
+            wp_send_json_error(['message' => 'Neznámá sub-akce pro kontrolu produktů bez obrázků.']);
+        }
+    }
+
+    /**
+     * Handles direct execution of analyze step via URL
+     */
+    private function handle_direct_analyze_step() {
+        if (!current_user_can('manage_options')) {
+            wp_die('Unauthorized');
+        }
+
+        if (!$this->ensure_product_service()) {
+            wp_die('Product service not available');
+        }
+
+        try {
+            $result = $this->product_service->analyze_local_db_vs_wc();
+            
+            if (is_wp_error($result)) {
+                wp_die($result->get_error_message());
+            }
+            
+            // Extract the key statistics
+            $stats = $result['data'] ?? [];
+            ?>
+            <div class="wrap">
+                <h1>Aktualizace Pohoda databáze</h1>
+                <div class="card">
+                    <table class="widefat">
+                        <tr>
+                            <td><strong>Celkem produktů:</strong></td>
+                            <td><?php echo esc_html($stats['total_products'] ?? 0); ?></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Shodující se:</strong></td>
+                            <td><?php echo esc_html($stats['matching'] ?? 0); ?></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Neshodující se:</strong></td>
+                            <td><?php echo esc_html($stats['mismatch'] ?? 0); ?></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Chybějící:</strong></td>
+                            <td><?php echo esc_html($stats['missing'] ?? 0); ?></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Neznámé:</strong></td>
+                            <td><?php echo esc_html($stats['unknown'] ?? 0); ?></td>
+                        </tr>
+                    </table>
+                </div>
+                
+                <p><a href="<?php echo admin_url('admin.php?page=pohoda-settings'); ?>" class="button">Zpět na nastavení</a></p>
+            </div>
+            <?php
+        } catch (Exception $e) {
+            wp_die('Error during analysis: ' . $e->getMessage());
+        }
     }
 } 

@@ -656,4 +656,123 @@ class Pohoda_Product_Service {
         pohoda_debug_log("Pohoda_Product_Service: Successfully updated local product PK ID {$pohoda_db_row_pk_id}. Rows affected: {$updated_rows}. New status: {$update_data['comparison_status']}");
         return ['success' => true, 'updated' => $updated_rows > 0, 'new_status' => $update_data['comparison_status']];
     }
+
+    public function analyze_local_db_vs_wc() {
+        pohoda_debug_log("Pohoda_Product_Service: Starting analyze_local_db_vs_wc");
+        
+        if (!function_exists('wc_get_product')) {
+            pohoda_debug_log("Pohoda_Product_Service: WooCommerce not active");
+            return new WP_Error('woocommerce_not_active', 'WooCommerce is not active');
+        }
+
+        $table_name = $this->wpdb->prefix . 'pohoda_products';
+        $products_in_db = $this->wpdb->get_results("SELECT * FROM $table_name", ARRAY_A);
+        
+        if (empty($products_in_db)) {
+            pohoda_debug_log("Pohoda_Product_Service: No products in local database");
+            return [
+                'success' => true,
+                'message' => 'No products in local database',
+                'data' => [
+                    'total_products' => 0,
+                    'matching' => 0,
+                    'mismatching' => 0,
+                    'missing' => 0,
+                    'unknown' => 0
+                ]
+            ];
+        }
+
+        $analysis = [
+            'total_products' => count($products_in_db),
+            'matching' => 0,
+            'mismatching' => 0,
+            'missing' => 0,
+            'unknown' => 0,
+            'details' => []
+        ];
+
+        foreach ($products_in_db as $product) {
+            $status = $product['comparison_status'] ?? 'unknown';
+            $analysis[$status]++;
+            
+            if ($status === 'mismatch') {
+                $analysis['details'][] = [
+                    'id' => $product['id'],
+                    'code' => $product['code'],
+                    'name' => $product['name'],
+                    'pohoda_stock' => $product['count'],
+                    'wc_stock' => $product['woocommerce_stock'],
+                    'pohoda_price' => $product['selling_price'],
+                    'wc_price' => $product['woocommerce_price']
+                ];
+            }
+        }
+
+        pohoda_debug_log("Pohoda_Product_Service: Analysis completed. Results: " . print_r($analysis, true));
+        
+        return [
+            'success' => true,
+            'message' => 'Analysis completed successfully',
+            'data' => $analysis
+        ];
+    }
+
+    public function update_all_wc_prices_from_db() {
+        pohoda_debug_log("Pohoda_Product_Service: Starting update_all_wc_prices_from_db");
+        
+        if (!function_exists('wc_get_product')) {
+            pohoda_debug_log("Pohoda_Product_Service: WooCommerce not active");
+            return ['success' => false, 'message' => 'WooCommerce is not active'];
+        }
+
+        $table_name = $this->wpdb->prefix . 'pohoda_products';
+        $products = $this->wpdb->get_results("SELECT * FROM {$table_name} WHERE woocommerce_exists = 1 AND woocommerce_id > 0", ARRAY_A);
+        
+        if (empty($products)) {
+            pohoda_debug_log("Pohoda_Product_Service: No products found in local database with WooCommerce IDs");
+            return ['success' => true, 'updated_count' => 0, 'failed_count' => 0, 'errors' => []];
+        }
+
+        $updated_count = 0;
+        $failed_count = 0;
+        $errors = [];
+
+        foreach ($products as $product) {
+            try {
+                $wc_product = wc_get_product($product['woocommerce_id']);
+                
+                if (!$wc_product) {
+                    $failed_count++;
+                    $errors[] = "Product ID {$product['id']}: WooCommerce product not found";
+                    continue;
+                }
+
+                // Calculate price with VAT
+                $vat_rate = $product['vat_rate'] ? (float)$product['vat_rate'] : 21;
+                $price_with_vat = (float)$product['selling_price'] * (1 + ($vat_rate / 100));
+                $price_with_vat = ceil($price_with_vat);
+
+                // Update price
+                $wc_product->set_regular_price($price_with_vat);
+                $wc_product->save();
+                
+                $updated_count++;
+                
+            } catch (Exception $e) {
+                $failed_count++;
+                $errors[] = "Product ID {$product['id']}: " . $e->getMessage();
+                pohoda_debug_log("Pohoda_Product_Service Error: " . $e->getMessage());
+            }
+        }
+        
+        pohoda_debug_log("Pohoda_Product_Service: Updated {$updated_count} products with new prices");
+        
+        return [
+            'success' => true,
+            'updated_count' => $updated_count,
+            'failed_count' => $failed_count,
+            'errors' => $errors
+        ];
+    }
 } 

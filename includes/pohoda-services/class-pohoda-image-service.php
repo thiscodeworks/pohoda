@@ -40,8 +40,17 @@ class Pohoda_Image_Service {
              return ['success' => false, 'message' => 'API IP address or port not configured.'];
         }
 
-        $url = "http://{$options['ip_address']}:{$options['port']}/documents/Obrázky/{$filename}";
-        // Credentials should be fetched from api_client as well
+        // Ensure $filename is URL encoded to handle special characters like spaces, diacritics, etc.
+        // However, path segments should NOT be fully encoded. We only want to encode the filename part.
+        // If $filename can contain directory paths from Pohoda, this needs careful handling.
+        // Assuming $filename is just the file name for now.
+        $encoded_filename = rawurlencode($filename); // Use rawurlencode for path components
+
+        $url = "http://{$options['ip_address']}:{$options['port']}/documents/Obrázky/{$encoded_filename}";
+        
+        // Log the constructed URL for debugging
+        pohoda_debug_log("Pohoda_Image_Service: Attempting to fetch image from URL: " . $url . " (Original filename: " . $filename . ")");
+
         $credentials = $this->api_client->get_credentials_basic_auth_string(); // Corrected method name
 
         $ch = curl_init($url);
